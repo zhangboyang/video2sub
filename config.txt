@@ -1,0 +1,58 @@
+{
+    'port': 20000,
+
+    'maxlog': 100,
+    'maxcheckpoint': 1000,
+
+    'thumbnail': { # 缩略图设置
+        'height': 150,  # 高度
+        'npart': 10,    # 同一文件中合并存储几张缩略图
+    },
+
+    'subthumb': {
+        'height': 20,
+    },
+
+    'chineseocr': { # chineseocr设置
+        'url': 'http://127.0.0.1:8080/ocr',
+    },
+
+    'dummyocr': {
+        'always_error': 0,
+    },
+
+    'baiduocr': {
+        # 样例KEY来自 https://cloud.baidu.com/doc/OCR/s/dk3iqnq51
+        'API_KEY': 'GmhC18eVP1Fo1ECX911dtOzw',
+        'SECRET_KEY': 'PQ2ukO4Aec2PTsgQU9UkiEKYciavlZk8',
+
+        'TOKEN_URL': 'https://aip.baidubce.com/oauth/2.0/token',
+        'OCR_URL': 'https://aip.baidubce.com/rest/2.0/ocr/v1/',
+        'qps_limit': 2,
+        'batch_size': 30,
+        'language_type': 'CHN_ENG',
+    },
+
+    'ass_template': {
+        'header':  ######## ASS文件头模板
+'''[Script Info]
+Title: {{文件名}}
+ScriptType: v4.00+
+WrapStyle: 0
+ScaledBorderAndShadow: yes
+YCbCr Matrix: None
+PlayResX: {{视频宽度}}
+PlayResY: {{视频高度}}
+
+[V4+ Styles]
+Format: Name, Fontname, Fontsize, PrimaryColour, SecondaryColour, OutlineColour, BackColour, Bold, Italic, Underline, StrikeOut, ScaleX, ScaleY, Spacing, Angle, BorderStyle, Outline, Shadow, Alignment, MarginL, MarginR, MarginV, Encoding
+Style: Default,方正兰亭圆_GBK_准,{{字幕高度}},&H00FFFFFF,&H000000FF,&H00000000,&H00000000,0,0,0,0,100,100,0,0,1,2,0,2,10,10,{{底边距}},1
+
+[Events]
+Format: Layer, Start, End, Style, Name, MarginL, MarginR, MarginV, Effect, Text
+''',
+        'line':  ######## ASS字幕行模板
+'''Dialogue: 0,{{开始时间}},{{结束时间}},Default,,0,0,0,,{{字幕文本}}
+'''
+    },
+}

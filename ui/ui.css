@@ -1,0 +1,531 @@
+html, body {
+  margin: 0;
+  padding: 0;
+  width: 100%;
+  height: 100%;
+  font-size: 16px;
+  line-height: 20px;
+  background-color: white;
+  font-family: Tahoma, '宋体', SimSun, sans-serif;
+  overflow-x: hidden;
+  overflow-y: auto;
+}
+a {
+  color: blue;
+  text-decoration: underline;
+  cursor: pointer;
+  user-select: none;
+}
+a.button {
+  display: inline-block;
+  height: 20px;
+  vertical-align: middle;
+  position: relative;
+  background-color: white;
+  border: 1px solid gray;
+  padding: 2px;
+  text-align: center;
+}
+a.button:hover {
+  border-color: black;
+}
+a.button > div {
+  display: none;
+}
+a.button:hover > div {
+  text-align: left;
+  position: absolute;
+  width: max-content;
+  display: inline-block;
+  background-color: white;
+  border: 1px solid black;
+  z-index: 100;
+  padding: 2px;
+  color: black;
+  pointer-events: none;
+}
+a.button:hover > div.bl { /* bottom-left tooltip */
+  top: 26px;
+  left: -1px;
+}
+a.button:hover > div.br { /* bottom-right tooltip*/
+  top: 26px;
+  right: -1px;
+}
+a.button:hover > div.tr { /* top-right tooltip*/
+  bottom: 26px;
+  right: -1px;
+}
+[v-cloak] {
+  display: none;
+}
+#app {
+  width: 100%;
+  height: 100%;
+  position: relative;
+}
+#loading {
+  position: absolute;
+  left: 0;
+  top: 0;
+  height: 100%;
+  width: 100%;
+  background-color: white;
+  padding: 20px;
+  box-sizing: border-box;
+}
+#apparea {
+  width: 100%;
+  height: 100%;
+  display: flex;
+  flex-direction: column;
+}
+#apparea > div {
+  position: relative;
+}
+#apparea > div:not(:first-child) {
+  border-top: 1px black solid;
+}
+.dialogbackground {
+  position: absolute;
+  left: 0;
+  top: 0;
+  width: 100%;
+  height: 100%;
+  background-color: rgba(0, 0, 0, 0.5);
+}
+#title {
+  text-align: center;
+}
+
+div.imgdb {
+  position: relative;
+  overflow: hidden;
+}
+div.imgdb > img {
+  position: absolute;
+}
+
+#video {
+  user-select: none;
+}
+#framearea {
+  display: flex;
+}
+#framebox {
+  display: block;
+  margin: 0 10px;
+}
+#frametitle {
+  border: 1px solid black;
+  border-bottom: 0;
+}
+#frame {
+  border: 1px solid black;
+  position: relative;
+  background-color: cadetblue;
+}
+#frame > #frameevent {
+  left: 0;
+  top: 0;
+  position: absolute;
+  width: 100%;
+  height: 100%;
+}
+#frame > img {
+  width: 100%;
+  height: 100%;
+}
+#frameleft {
+  flex: 1;
+  overflow-wrap: anywhere;
+  writing-mode: vertical-rl;
+}
+#frameright {
+  flex: 1;
+  overflow-wrap: anywhere;
+  writing-mode: vertical-lr;
+}
+#frameleft > *, #frameright > * {
+  writing-mode: horizontal-tb;
+  margin: 0 5px;
+}
+div.toolbox {
+  border: 1px solid gray;
+}
+div.toolbox > strong {
+  box-sizing: border-box;
+  display: block;
+  width: 100%;
+  padding: 2px 5px;
+  text-align: center;
+}
+div.toolbox > div:not(:first-child) {
+  border-top: 1px solid gray;
+}
+div.toolbox > div.text {
+  padding: 2px 5px;
+}
+
+#frame > #ocrarea {
+  width: calc(100% + 2px);
+  position: absolute;
+  border-style: solid;
+  border-width: 0px 9px;
+  left: -10px;
+}
+.neighborframe {
+  float: right;
+}
+#dispsize, #ocrinfo {
+  margin-top: 15px;
+  float: left;
+}
+#ocrinfo {
+  width: 100px;
+}
+
+#editor {
+  padding: 5px;
+  display: flex;
+}
+#editor > div {
+  flex: 1;
+  margin: 0 5px;
+  position: relative;
+}
+#editor > div:first-child > div {
+  right: 0;
+}
+#editor > div > div {
+  position: absolute;
+  bottom: 0;
+}
+#editor > input {
+  display: block;
+  margin: 0 auto;
+  padding: 2px;
+  text-align: center;
+  border: 1px solid black;
+  font-family: Arial, '黑体', SimHei;
+}
+#editor > input:read-only {
+  background-color: lightgray;
+}
+
+#thumbnail {
+  position: absolute;
+  border: 1px solid #00ff00; 
+  bottom: 0;
+}
+#timebar {
+  background-color: magenta;
+  height: 30px;
+  min-height: 30px;
+  user-select: none;
+  overflow: hidden;
+}
+#timebar > div {
+  position: absolute;
+  left: 0;
+  top: 0;
+  height: 100%;
+}
+#timebar > div#barbg {
+  width: 100%;
+}
+#timebar > div#posmarker {
+  width: 0;
+  height: 0;
+  margin: 0 -5px;
+  border-style: solid;
+  border-width: 0 5px 10px 5px;
+  border-color: transparent transparent #007bff transparent;
+  z-index: 2;
+}
+#timebar > div#mousemarker {
+  width: 0;
+  height: 0;
+  margin: 0 -5px;
+  border-style: solid;
+  border-width: 0 5px 10px 5px;
+  border-color: transparent transparent #00ff00 transparent;
+  z-index: 2;
+}
+#timebar > #mouselabel {
+  margin-left: 10px;
+  color: green;
+  z-index: 2;
+}
+#timebar > canvas {
+  height: 100%;
+  position: absolute;
+  left: 0;
+  top: 0;
+  z-index: 1;
+}
+#thumbbar {
+  background-color:lightgray;
+}
+
+
+#op input[type='text'] {
+  width: 70px;
+  height: 26px;
+  border: 1px solid black;
+  box-sizing: border-box;
+  vertical-align: middle;
+  font-size: 14px;
+}
+#op input[type='file'] {
+  display: none;
+}
+#op select {
+  width: 150px;
+  height: 26px;
+  box-sizing: border-box;
+  font-size: 14px;
+  border: 1px solid black;
+  vertical-align: middle;
+  background-color: greenyellow;
+}
+#op {
+  background-color: #e8ffcd;
+  user-select: none;
+  display: flex;
+}
+#op > div:nth-child(2) {
+  flex: 1
+}
+#op > div > div {
+  display: block;
+  padding: 2px 10px;
+}
+#op > div:not(:first-child) > div {
+  border-left: 1px solid black;
+}
+#op > div > div:not(:first-child) {
+  border-top: 1px solid black;
+}
+
+#codeeditor {
+  border: 1px solid black;
+  background-color: white;
+  width: 80%;
+  height: 80%;
+  position: absolute;
+  top: 10%;
+  left: 10%;
+  z-index: 20;
+  display: flex;
+  flex-direction: column;
+  user-select: none;
+}
+#codeeditor > div:not(:first-child) {
+  border-top: 1px solid black;
+}
+#codeeditor > #codeeditortitle {
+  text-align: center;
+  line-height: 24px;
+  position: relative;
+}
+#codeeditor > #codeeditortitle > a {
+  position: absolute;
+  width: 24px;
+  border-left: 1px solid black;
+  right: 0;
+  top: 0;
+}
+#codeeditor > #editordiv {
+  flex: 1;
+  overflow: hidden;
+}
+#codeeditor > #scriptselect {
+  padding: 2px 5px;
+}
+#codeeditor > #scriptselect > select {
+  border: 1px solid black;
+  background-color: azure;
+  height: 26px;
+  width: 300px;
+}
+#codeeditor > #editordiv > .CodeMirror {
+  height: 100%;
+  width: 100%;
+}
+#codeeditor > #codeeditorop {
+  padding: 2px 5px;
+}
+#codeeditor > #codeeditorop > .button {
+  float: right;
+  min-width: 60px;
+  min-height: 26px;
+  line-height: 26px;
+  margin-right: 10px;
+}
+
+table {
+  border-collapse: collapse;
+}
+table td, table th {
+  border: 1px gray solid;
+  padding: 2px 5px;
+}
+
+#text {
+  flex: 1;
+  overflow-y: scroll;
+  min-height: 80px;
+}
+#text > div {
+  padding: 0 10px;
+}
+#text > table {
+  width: 100%;
+}
+#text > table th {
+  white-space: nowrap;
+}
+#text > table td:not(:nth-child(4)) {
+  white-space: nowrap;
+}
+#text > table td:nth-child(4) {
+  width: 100%;
+  white-space: pre;
+}
+#text > table td:nth-child(1) {
+  cursor: pointer;
+  text-decoration: underline;
+  color: blue;
+  user-select: none;
+}
+#text > table tr[data-state='waitocr'] {
+  background-color: lightgray;
+}
+#text > table tr[data-state='error'] {
+  background-color: lightpink;
+}
+#text > table tr[data-state='merged'] {
+  background-color: lightgray;
+}
+#text > table tr:hover {
+  background-color: lemonchiffon !important;
+}
+#text > table tr[data-tag~='sticky'] td:nth-child(2) {
+  color: gray;
+}
+#text > table tr[data-state='done'][data-tag~='sel'] {
+  background-color: rgb(130, 215, 255);
+}
+#text > table tr[data-state='done'][data-tag~='cur'] {
+  background-color: yellowgreen;
+}
+#text > table tr[data-tag~='cur'] td:nth-child(2) {
+  background-color: yellowgreen;
+}
+#text > table tr[data-tag~='cur'] td:first-child {
+  background-color: yellowgreen;
+}
+#text > table tr[data-tag~='sel'] div.img {
+  outline: 2px solid blue;
+}
+#text > table tr[data-tag~='sel'] td:first-child {
+  background-color: rgb(130, 215, 255) !important;
+}
+#text > table tr[data-lock='locked'] {
+  text-decoration: line-through;
+}
+#text > table tr[data-empty='empty'] td:nth-child(4) {
+  color: gray;
+}
+
+#text > table tr:hover td:nth-child(4) {
+  text-decoration: underline;
+}
+#text > table tr div.img {
+  outline: 1px solid white;
+}
+#text > table tr:hover div.img {
+  outline: 1px dashed red !important;
+}
+
+
+#logbar > div.buttonbar {
+  display: inline-block;
+  position: absolute;
+  right: 32px;
+  bottom: 5px;
+  text-align: right;
+}
+#logbar > div.buttonbar .button {
+  margin: 2px 0;
+}
+#logs {
+  height: 100%;
+  width: 100%;
+  overflow-y: scroll;
+}
+#logs > table {
+  width: 100%;
+}
+#logs > table tr[data-level='I'] {
+  background-color: azure;
+}
+#logs > table tr[data-level='E'] {
+  background-color: lightpink;
+}
+#logs > table tr[data-level='S'] {
+  background-color: lightgreen;
+}
+#logs > table tr[data-level='W'] {
+  background-color: lightyellow;
+}
+#logs > table tr[data-level='C'] {
+  background-color: gold;
+}
+#logs > table td:not(:last-child) {
+  white-space: nowrap;
+}
+#logs > table td:last-child {
+  width: 100%;
+}
+
+#promptbg {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  z-index: 20;
+}
+#promptdialog {
+  border: 1px solid black;
+  background-color: white;
+  width: 300px;
+  height: 150px;
+  position: absolute;
+  margin: auto;
+  z-index: 20;
+  display: flex;
+  flex-direction: column;
+  user-select: none;
+  padding: 10px;
+}
+#promptdialog > div:nth-child(1) {
+  padding: 10px;
+}
+#promptdialog > div:nth-child(2) {
+  flex: 1;
+}
+#promptdialog > div:nth-child(2) > input {
+  width: 90%;
+  margin: auto;
+  display: block;
+  border: 1px solid black;
+  padding: 5px;
+  font-size: 16px;
+}
+#promptdialog > div:nth-child(3) {
+  text-align: right;
+}
+#promptdialog > div:nth-child(3) > a.button {
+  padding: 10px 20px;
+}
