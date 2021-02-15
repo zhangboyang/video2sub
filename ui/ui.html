@@ -45,10 +45,10 @@
                 <imgdb v-if="pos<info.nframes-1" :src="ziprowidx(thumbnail, pos+1)" @click.native="setframepos(pos+1,1)"></imgdb>
                 <div v-else :style="{ height: info.thumb_h+'px', width: info.thumb_w+'px', 'line-height': info.thumb_h+'px', 'text-align': 'center' }">无</div>
               </div>
-              <div id="ocrinfo" class="toolbox">
+              <div id="ocrinfo" class="toolbox" @click="inputocrsel">
                 <strong>OCR区域</strong>
                 <div class="text">
-                  <span v-if="ocrsel[0]<0">请在图片上用左键拖动来指定字幕的范围</span>
+                  <span v-if="ocrsel[0]<0">请在图片上用左键拖动，或单击此框来指定字幕的范围</span>
                   <span v-else>y1={{ocrsel[0]}}<br>y2={{ocrsel[1]}}</span>
                 </div>
                 <div class="text" v-if="mousexy[0]>=0">
@@ -84,7 +84,7 @@
           <div id="mousemarker" v-if="mousepos>=0" :style="{ left: pos2percent(mousepos) }"></div>
           <div id="mouselabel" v-if="mousepos>=0" :style="{ left: pos2percent(mousepos) }">{{mousepos}}</div>
         </div>
-        <div ref="text" id="text">
+        <div ref="text" id="text" @click="jumpnull">
           <table id="ocrresult">
             <thead>
               <tr>

@@ -8,7 +8,8 @@ import json
 import os
 import time
 import base64
-import urllib
+import urllib.parse
+import urllib.request
 import traceback
 import zlib
 import secrets
@@ -22,7 +23,7 @@ import numpy as np
 video = sys.argv[1]
 print(video)
 
-gconfig = ast.literal_eval(open('config.txt', 'r').read())
+gconfig = ast.literal_eval(open('config.txt', 'r', encoding='utf_8_sig').read())
 
 mime = {
     '.jpg': 'image/jpeg',
@@ -45,6 +46,8 @@ fps = cap.get(cv2.CAP_PROP_FPS)
 nframes = int(cap.get(cv2.CAP_PROP_FRAME_COUNT))
 
 def frame2sec(n, fps):
+    if not gconfig['fix_ntsc_fps']:
+        return n * fps
     fpsdict = {
         '23.976': [24000,1001],
         '29.970': [30000,1001],
@@ -89,6 +92,10 @@ c.execute('CREATE INDEX IF NOT EXISTS itemstate ON ocrresult (state)')
 
 c.execute('CREATE TABLE IF NOT EXISTS logs (date TEXT, level CHAR(1), message TEXT, checkpoint_id INTEGER)')
 c.execute('CREATE TABLE IF NOT EXISTS checkpoint (checkpoint_id INTEGER PRIMARY KEY AUTOINCREMENT, date TEXT, message TEXT, data BLOB)')
+
+c.executemany('INSERT OR IGNORE INTO config VALUES (?,?)', [(k, json.dumps(v)) for k, v in gconfig['default'].items()])
+
+conn.commit()
 
 def getconfig(db, key):
     val = db.cursor().execute('SELECT value FROM config WHERE key = ?', (key,)).fetchone()
@@ -221,6 +228,7 @@ class BaiduOcr:
         self.service = arg
         self.use_batch = not arg.endswith('_basic')
         self.ocr_batch = gconfig['baiduocr']['batch_size'] if self.use_batch else 1
+        self.ninvoke = 0
 
     def fetch_token(self):
         if BaiduOcr.token is not None:
@@ -266,8 +274,9 @@ class BaiduOcr:
                 succ, blob = cv2.imencode('.jpg', img, [int(cv2.IMWRITE_JPEG_QUALITY), 99])
                 assert succ
                 file_content = blob.tobytes()
-                with open('dump.jpg', 'wb') as f:
-                    f.write(file_content)
+                #with open('dump.jpg', 'wb') as f:
+                #    f.write(file_content)
+                self.ninvoke += 1
                 result = self.request(url, urllib.parse.urlencode({
                     'image': base64.b64encode(file_content),
                     'language_type': gconfig['baiduocr']['language_type'],
@@ -300,9 +309,11 @@ class BaiduOcr:
             if ocr_stop:
                 break
         return results
+    def done(self):
+        return '调用了%d次百度文字识别API(%s)'%(self.ninvoke,self.service)
 
 class ChineseOcr:
-    ocr_batch = 1
+    ocr_batch = 5
     global ocr_stop
     def __init__(self, arg):
         if arg == 'multi':
@@ -312,7 +323,8 @@ class ChineseOcr:
     def run(self, imglist):
         results = []
         for img in imglist:
-            succ, blob = cv2.imencode('.bmp', img)
+            format = '.bmp'
+            succ, blob = cv2.imencode(format, img)
             assert succ
             #with open('dump.bmp', 'wb') as f:
             #    f.write(blob.tobytes())
@@ -328,17 +340,21 @@ class ChineseOcr:
             if ocr_stop:
                 break
         return results
+    def done(self):
+        return None
 
 class DummyOcr:
-    ocr_batch = 100
+    ocr_batch = 30
     def run(self, imglist):
         if gconfig['dummyocr']['always_error']:
             return [('error', None)] * len(imglist)
         else:
             return [('done', '测试')] * len(imglist)
+    def done(self):
+        return None
 
 def createocr(engine, h):
-    if engine == 'dummy':
+    if engine == 'dummyocr':
         return DummyOcr()
     if engine.startswith('chineseocr:'):
         return ChineseOcr(engine[len('chineseocr:'):])
@@ -389,6 +405,10 @@ def run_ocrjob():
                 _, engine0, top0, bottom0, _ = lines[-1]
                 if engine0 != curengine:
                     curengine = engine0
+                    if ocr:
+                        msg = ocr.done()
+                        if msg:
+                            log(msg, 'I', db=conn)
                     ocr = createocr(engine0, bottom0 - top0)
                 while len(lines) > 0 and len(batch) < ocr.ocr_batch:
                     _, engine, top, bottom, _ = lines[-1]
@@ -430,6 +450,9 @@ def run_ocrjob():
                 conn.commit()
                 thread_yield()
         
+        msg = ocr.done()
+        if msg:
+            log(msg, 'I', db=conn)
         msg = 'OCR任务已完成(空项数%d)'%emptycnt if errcnt == 0 else 'OCR任务已完成(空项数%d)，但有%d个错误发生，请使用“继续OCR”功能来重试错误项'%(emptycnt,errcnt)
         log(msg, 'S', db=conn)
         conn.commit()
@@ -518,6 +541,10 @@ def serve_home():
 def serve_ui(filename):
     return flask.send_from_directory('ui', filename)
 
+@app.route('/getpid', methods=['POST'])
+def serve_getpid():
+    return flask.jsonify(os.getpid())
+
 @app.route('/session', methods=['POST'])
 def serve_session():
     global session
@@ -562,11 +589,27 @@ def serve_thumbnail():
 @session_header_required
 def serve_logs():
     return db2json(conn, '''
-        SELECT date, level, message, checkpoint_id FROM (
+        SELECT id, date, level, message, checkpoint_id FROM (
             SELECT * FROM (SELECT ROWID AS id, * FROM logs WHERE checkpoint_id IS NULL ORDER BY ROWID DESC LIMIT ?)
             UNION ALL
             SELECT * FROM (SELECT ROWID AS id, * FROM logs WHERE checkpoint_id IS NOT NULL ORDER BY ROWID DESC LIMIT ?)
         ) ORDER BY id''', (gconfig['maxlog'], gconfig['maxcheckpoint']))
+
+@app.route('/state', methods=['POST'])
+@session_header_required
+def serve_state():
+    loaded = not init_thread.is_alive()
+    ocrjob = ocr_thread is not None and ocr_thread.is_alive()
+    nresult = c.execute('SELECT COUNT(id) FROM ocrresult').fetchone()[0]
+    nwaitocr = c.execute("SELECT COUNT(id) FROM ocrresult WHERE state = 'waitocr'").fetchone()[0]
+    nerror = c.execute("SELECT COUNT(id) FROM ocrresult WHERE state = 'error'").fetchone()[0]
+    return flask.jsonify({
+        'loaded': loaded,
+        'ocrjob': ocrjob,
+        'nresult': nresult,
+        'nwaitocr': nwaitocr,
+        'nerror': nerror,
+    })
 
 @app.route('/exportass', methods=['POST'])
 @session_header_required
@@ -717,6 +760,11 @@ def serve_saveconfig():
     conn.commit()
     return ''
 
+@app.route('/allengines', methods=['POST'])
+@session_header_required
+def serve_allengines():
+    return flask.jsonify(gconfig['allengines'])
+
 @app.route('/updateresult', methods=['POST'])
 @session_header_required
 def serve_updateresult():
@@ -750,7 +798,7 @@ def serve_startocr():
     ocrconf = getconfig(conn, 'OCR')
     ocrconf = json.loads(ocrconf) if ocrconf else {}
     ocrtop = ocrconf['top'] if 'top' in ocrconf else -1
-    ocrbottom = ocrconf['bottom'] if 'bottom' in ocrconf else -1
+    ocrbottom = ocrconf['bottom']+1 if 'bottom' in ocrconf else -1
     if ocrtop < 0 or ocrbottom < 0:
         log('请先指定字幕在屏幕上的范围', 'E', db=conn)
         conn.commit()
@@ -770,7 +818,7 @@ def serve_startocr():
     log('OCR任务已提交', db=conn)
     conn.commit()
     startocr()
-    return ''
+    return 'ok'
 
 @app.route('/stopocr', methods=['POST'])
 @session_header_required
@@ -839,7 +887,7 @@ def serve_continueocr():
     log('OCR任务已提交', db=conn)
     conn.commit()
     startocr()
-    return ''
+    return 'ok'
 
 @app.after_request
 def add_header(response):

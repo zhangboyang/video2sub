@@ -375,7 +375,7 @@ table td, table th {
 #text {
   flex: 1;
   overflow-y: scroll;
-  min-height: 80px;
+  min-height: 10px;
 }
 #text > div {
   padding: 0 10px;
@@ -408,7 +408,7 @@ table td, table th {
 #text > table tr[data-state='merged'] {
   background-color: lightgray;
 }
-#text > table tr:hover {
+#text > table tbody tr:hover {
   background-color: lemonchiffon !important;
 }
 #text > table tr[data-tag~='sticky'] td:nth-child(2) {
@@ -427,7 +427,7 @@ table td, table th {
   background-color: yellowgreen;
 }
 #text > table tr[data-tag~='sel'] div.img {
-  outline: 2px solid blue;
+  outline: 2px solid blue !important;
 }
 #text > table tr[data-tag~='sel'] td:first-child {
   background-color: rgb(130, 215, 255) !important;
@@ -446,7 +446,7 @@ table td, table th {
   outline: 1px solid white;
 }
 #text > table tr:hover div.img {
-  outline: 1px dashed red !important;
+  outline: 1px dashed red;
 }
 
 

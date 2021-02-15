@@ -90,13 +90,16 @@ function updatetbledit() {
 }
 function tbledit(item, scrolltype) {
   if (item) {
-    app.setframepos(item.r[colmap['frame_start']], scrolltype);
+    if (!app.curedit || app.curedit[colmap['id']] != item.r[colmap['id']]) {
+      app.setframepos(item.r[colmap['frame_start']], scrolltype);
+    }
     app.curedit = JSON.parse(JSON.stringify(item.r));
   } else {
     app.curedit = null;
   }
 }
 function tblclick(e) {
+  e.stopPropagation();
   if (e.shiftKey) {
     tblop.call(this, e);
     return;
@@ -201,7 +204,7 @@ function updateresult(jsonstr) {
       item.ele.dataset.state = row.state;
       item.ele.dataset.empty = row.ocrtext == '' ? 'empty' : '';
       item.ele.children[1].innerText = row.frame_start + '-' + row.frame_end;
-      item.ele.children[2].innerText = row.engine + '(' + row.top + '-' + row.bottom + ')';
+      item.ele.children[2].innerText = row.engine + '(' + row.top + '-' + (row.bottom-1) + ')';
       item.ele.children[3].textContent = row.state == 'done' ? (row.ocrtext == '' ? '(空)' : row.ocrtext) :
         row.state == 'waitocr' ? '等待OCR' :
         row.state == 'error' ? 'OCR失败：' + row.ocrtext :
@@ -272,15 +275,7 @@ app = new Vue({
     rerefresh: false,
 
     ocrconfig: { engine: '', top: -1, bottom: -1 },
-    engines: new Map([
-      ['chineseocr:multi', 'chineseocr(多行模式) -- 推荐“新OCR”使用'],
-      ['chineseocr:single', 'chineseocr(单行模式)'],
-      ['baiduocr:accurate', '百度OCR(高精度,批量) -- 推荐“重新OCR”使用'],
-      ['baiduocr:accurate_basic', '百度OCR(高精度,单独)'],
-      ['baiduocr:general', '百度OCR(标准版,批量)'],
-      ['baiduocr:general_basic', '百度OCR(标准版,单独)'],
-      ['dummy', 'dummy(调试用)'],
-    ]),
+    engines: new Map(),
 
     codeeditor: 0,
     codeedit: null,
@@ -290,6 +285,17 @@ app = new Vue({
     scriptsel2: null,
     scripttemplate: `// 自定义脚本
 function (ocrresult) {
+  ocrresult.forEach((item) => {
+    // item.id           字幕唯一ID
+    // item.state        字幕状态：waitocr, error, done, merged
+    // item.frame_start  字幕起始帧
+    // item.frame_end    字幕结束帧(含)
+    // item.engine       使用的OCR引擎名
+    // item.top          字幕区域Y1
+    // item.bottom       字幕区域Y2(不含)
+    // item.ocrtext      字幕文本
+  });
+  //return '处理完毕';
 }
 `,
     defaultscripts: [
@@ -315,7 +321,9 @@ function (ocrresult) {
         }
       }
     }
-    lastitem = item;
+    if (item.state != 'merged') {
+      lastitem = item;
+    }
   });
 }
 ` },
@@ -379,22 +387,25 @@ function (ocrresult) {
     editorfontsize() { this.saveui(); },
     curedit(newr, oldr) {
       this.cureditocrsel = newr ? [newr[colmap['top']], newr[colmap['bottom']]] : null;
+      let saveold = () => {
+        let upd = ziprow(ocrresult.col, oldr);
+        let upd_item = id2item.get(upd.id);
+        if (upd_item && !upd_item.locked && upd.state == 'done' && upd.ocrtext != this.$refs.editbox.value) {
+          upd.ocrtext = this.$refs.editbox.value;
+          this.refreshafter(axios.post('/updateresult', {
+            changes: [upd],
+            checkpoint: '“手动修改”之前',
+            message: '手动修改已保存：'+upd.ocrtext,
+          }));
+          tbllock(upd_item);
+        }
+      };
       if (newr && newr[colmap['state']] == 'done') {
         let item = id2item.get(newr[colmap['id']]);
         let different_item = JSON.stringify(newr) != JSON.stringify(oldr);
         if (item.locked || different_item) {
           if (different_item && oldr) {
-            let upd = ziprow(ocrresult.col, oldr);
-            let upd_item = id2item.get(upd.id);
-            if (upd_item && !upd_item.locked && upd.state == 'done' && upd.ocrtext != this.$refs.editbox.value) {
-              upd.ocrtext = this.$refs.editbox.value;
-              this.refreshafter(axios.post('/updateresult', {
-                changes: [upd],
-                checkpoint: '“手动修改”之前',
-                message: '手动修改已保存：'+upd.ocrtext,
-              }));
-              tbllock(upd_item);
-            }
+            saveold();
           }
           this.$refs.editbox.value = newr[colmap['ocrtext']];
           this.$refs.editbox.readOnly = item.locked;
@@ -402,6 +413,9 @@ function (ocrresult) {
           this.$refs.editbox.setSelectionRange(0, 0);
         }
       } else {
+        if (oldr) {
+          saveold();
+        }
         this.$refs.editbox.value = '';
         this.$refs.editbox.readOnly = true;
       }
@@ -411,10 +425,11 @@ function (ocrresult) {
     let session = (await axios.post('/session')).data;
     axios.defaults.headers.common['X-VIDEO2SUB-SESSION'] = session;
     this.info = (await axios.post('/info')).data;
-    this.ocrconfig = await this.loadconfig('OCR', { engine: 'chineseocr:multi', top: -1, bottom: -1 })
-    this.ocrsel = [this.ocrconfig.top, this.ocrconfig.bottom-1];
+    this.ocrconfig = await this.loadconfig('OCR')
+    this.ocrsel = [this.ocrconfig.top, this.ocrconfig.bottom];
     this.timesel = [0, this.info.nframes-1];
-    let uiconfig = await this.loadconfig('UI', { disp_h: 360, editorfontsize: 20 })
+    this.engines = new Map((await axios.post('/allengines')).data);
+    let uiconfig = await this.loadconfig('UI')
     this.setframescale(uiconfig.disp_h);
     this.editorfontsize = uiconfig.editorfontsize;
     this.curedit = null;
@@ -499,17 +514,37 @@ function (ocrresult) {
       if (this.mousexydown) {
         this.mousexydown = 0;
         this.framemousemove(e);
-        if (this.ocrsel[0] != this.ocrconfig.top || this.ocrsel[1] != this.ocrconfig.bottom-1) {
+        if (this.ocrsel[0] != this.ocrconfig.top || this.ocrsel[1] != this.ocrconfig.bottom) {
           if (this.ocrconfig.top == -1 || confirm('确定要修改OCR区域吗？')) {
-            this.ocrconfig.top = this.ocrsel[0];
-            this.ocrconfig.bottom = this.ocrsel[1]+1;
-            this.saveconfig('OCR', this.ocrconfig, 'OCR区域已设定 (Y1='+this.ocrconfig.top+', Y2='+(this.ocrconfig.bottom-1)+')');
+            this.saveocrsel();
           } else {
             this.ocrsel[0] = this.ocrconfig.top;
-            this.ocrsel[1] = this.ocrconfig.bottom-1;
+            this.ocrsel[1] = this.ocrconfig.bottom;
           }
         }
       }
+    },
+    inputocrsel() {
+      this.showmyprompt('请输入OCR区域信息，格式为“Y1 Y2”', this.ocrsel[0]+' '+this.ocrsel[1], (val) => {
+        if (val !== null) {
+          let newsel = val.split(' ').map((v) => parseInt(v, 10));
+          if (newsel.length == 2 && newsel[0] >= 0 && newsel[1] >= 0) {
+            newsel.sort((a, b) => a - b);
+            if (newsel[1] < this.info.height) {
+              this.ocrsel[0] = newsel[0];
+              this.ocrsel[1] = newsel[1];
+              this.saveocrsel();
+              return;
+            }
+          }
+          alert('无效值');
+        }
+      })
+    },
+    saveocrsel() {
+      this.ocrconfig.top = this.ocrsel[0];
+      this.ocrconfig.bottom = this.ocrsel[1];
+      this.saveconfig('OCR', this.ocrconfig, 'OCR区域已设定 (Y1='+this.ocrconfig.top+', Y2='+this.ocrconfig.bottom+')');
     },
 
     findneighbor() {
@@ -550,7 +585,7 @@ function (ocrresult) {
           lastitem.frame_end = item.frame_end;
           item.state = 'merged';
           item.comment = '已合并到上一字幕';
-          tbledit(next ? next : trueprev, 1);
+          tbledit(next, 1);
           tbllock(prev);
           tbllock(trueprev);
           tbllock(curr, true);
@@ -561,11 +596,14 @@ function (ocrresult) {
             checkpoint: '“与上条合并”之前',
             message: '修改已保存',
           }));
-          console.log(ziprow(ocrresult.col,trueprev.r), ziprow(ocrresult.col,prev.r), ziprow(ocrresult.col,curr.r));
+          //console.log(ziprow(ocrresult.col,trueprev.r), ziprow(ocrresult.col,prev.r), ziprow(ocrresult.col,curr.r));
         } else {
           alert('起始帧与上条字幕结束帧不相邻，拒绝合并');
         }
       }
+    },
+    jumpnull() {
+      tbledit(null);
     },
     jumpprev() {
       let prev = this.findneighbor()[0];
@@ -575,9 +613,7 @@ function (ocrresult) {
     },
     jumpnext() {
       let next = this.findneighbor()[2];
-      if (next) {
-        tbledit(next, 1);
-      }
+      tbledit(next, 1);
     },
     editorkeydown(e) {
       if (e.keyCode == 38) {
@@ -798,7 +834,7 @@ function (ocrresult) {
         alert('运行时错误:\n'+e);
         return false;
       }
-      console.log(old);
+      //console.log(old);
       let changed = JSON.stringify(zocrresult, ocrresult.col) != old;
       if (message !== '') this.setwaitstatus();
       this.refreshafter(axios.post('/updateresult', {
