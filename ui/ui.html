@@ -156,7 +156,7 @@
             <table>
               <tr v-for="log in ziprowarr(logs)" v-if="!checkpointonly||log.checkpoint_id!==null" :data-level="log.level">
                 <td>{{log.date}}</td>
-                <td>{{log.message}}<span v-if="log.checkpoint_id">&nbsp;<a @click.prevent="rollback(log.checkpoint_id)">恢复至此</a></span></td>
+                <td>{{log.message}}<span v-if="log.checkpoint_id">&nbsp;<a @click.prevent="rollback(log.checkpoint_id)">撤销至此</a></span></td>
               </tr>
               <tr v-if="waitstatus"><td></td><td>处理中…</td></tr>
               <tr v-if="pageerror" style="background-color: red; color: yellow"><td></td><td>与后端通信失败，请刷新页面重试！！！</td></tr>

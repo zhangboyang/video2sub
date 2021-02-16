@@ -9,10 +9,14 @@ import time
 import traceback
 import sqlite3
 
-if getattr(sys, 'frozen', False):
+sys.stdout.reconfigure(errors='replace')
+sys.stderr.reconfigure(errors='replace')
+
+if getattr(sys, 'frozen', False) and hasattr(sys, '_MEIPASS'):
     bundle_dir = sys._MEIPASS
 else:
     bundle_dir = os.path.dirname(os.path.abspath(__file__))
+
 os.chdir(bundle_dir)
 
 gconfig = ast.literal_eval(open('config.txt', 'r', encoding='utf_8_sig').read())
@@ -26,20 +30,23 @@ def exe(path):
     if os.name == 'nt':
         root, ext = os.path.splitext(path)
         if ext == '.py':
-            ext = '.exe'
-        return root + ext
+            if getattr(sys, 'frozen', False) and hasattr(sys, '_MEIPASS'):
+                ext = '.exe'
+            else:
+                return ['python', path]
+        return [root + ext]
     else:
         if os.path.isabs(path):
-            return path
+            return [path]
         else:
-            return os.path.join('.', path)
+            return [os.path.join('.', path)]
 
 def run_backend(file, silent=False):
     global backend
     global video
     global session
     video = os.path.basename(file)
-    backend = subprocess.Popen([exe('video2sub.py'), file], stdout=subprocess.DEVNULL if silent else None, stderr=subprocess.DEVNULL if silent else None)
+    backend = subprocess.Popen(exe('video2sub.py') + [file], stdout=subprocess.DEVNULL if silent else None, stderr=subprocess.DEVNULL if silent else None)
     session = None
     if api('/getpid') != backend.pid:
         raise Exception("pid mismatch")
@@ -58,7 +65,7 @@ def run_frontend():
         f.seek(0)
         f.truncate()
         json.dump(conf, f)
-    frontend = subprocess.Popen([exe(os.path.join(apppath, appexe))], close_fds=True)
+    frontend = subprocess.Popen(exe(os.path.join(apppath, appexe)), close_fds=True)
 
 def api(path='/', data=b'', retry=True):
     while True:
@@ -107,8 +114,8 @@ try:
     elif len(sys.argv) == 2:
         run_backend(sys.argv[1])
         run_frontend()
-        backend.wait()
         frontend.wait()
+        backend.kill()
     elif len(sys.argv) > 2:
         start_time = time.time()
         print('批处理模式')

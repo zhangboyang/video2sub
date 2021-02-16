@@ -20,8 +20,10 @@ from threading import Thread
 from cv2 import cv2  # make VSCode happy
 import numpy as np
 
+sys.stdout.reconfigure(errors='replace')
+sys.stderr.reconfigure(errors='replace')
+
 video = sys.argv[1]
-print(video)
 
 gconfig = ast.literal_eval(open('config.txt', 'r', encoding='utf_8_sig').read())
 
@@ -30,20 +32,55 @@ mime = {
     '.bmp': 'image/bmp',
 }
 
-def open_video():
-    cap = cv2.VideoCapture(video)
-    assert cap.isOpened(), "无法打开视频"
-    return cap
+class VideoReader:
+    def __init__(self):
+        self.file = video
+        self.cap = cv2.VideoCapture(self.file)
+        if not self.cap.isOpened():
+            raise Exception('无法打开视频：%s'%self.file)
+        self.width = int(self.cap.get(cv2.CAP_PROP_FRAME_WIDTH))
+        self.height = int(self.cap.get(cv2.CAP_PROP_FRAME_HEIGHT))
+        self.fps = self.cap.get(cv2.CAP_PROP_FPS)
+        self.nframes = int(self.cap.get(cv2.CAP_PROP_FRAME_COUNT))
+        self.logs = []
+    def read(self, frame):
+        if self.cap.get(cv2.CAP_PROP_POS_FRAMES) != frame:
+            self.cap.set(cv2.CAP_PROP_POS_FRAMES, frame)
+        succ, img = self.cap.read()
+        if succ:
+            return img
+        self.cap.release()
+        self.cap = cv2.VideoCapture(self.file)
+        if self.cap.isOpened():
+            self.cap.set(cv2.CAP_PROP_POS_FRAMES, frame)
+            succ, img = self.cap.read()
+            if succ:
+                self.logs.append(('读取视频帧%d/%d时发生错误，已尝试恢复；请考虑先转码一遍视频'%(frame, self.nframes), 'W'))
+                return img
+        self.logs.append(('读取视频帧%d/%d时发生错误；请考虑先转码一遍视频'%(frame, self.nframes), 'E'))
+        return np.zeros((self.height, self.width, 3), np.uint8)
+    def close(self):
+        self.cap.release()
+    def writelog(self, db):
+        if len(self.logs) > 0:
+            for str, level in self.logs:
+                log(str, level, db=db)
+            self.logs = []
+            return True
+        else:
+            return False
+
+
 
 #os.remove(video + '.db')
 def connect_db():
     return sqlite3.connect(video + '.db', timeout=999999)
 
-cap = open_video()
-width = int(cap.get(cv2.CAP_PROP_FRAME_WIDTH))
-height = int(cap.get(cv2.CAP_PROP_FRAME_HEIGHT))
-fps = cap.get(cv2.CAP_PROP_FPS)
-nframes = int(cap.get(cv2.CAP_PROP_FRAME_COUNT))
+cap = VideoReader()
+width = cap.width
+height = cap.height
+fps = cap.fps
+nframes = cap.nframes
 
 def frame2sec(n, fps):
     if not gconfig['fix_ntsc_fps']:
@@ -169,11 +206,11 @@ thumb_h = gconfig['thumbnail']['height']
 thumb_w = int(width / height * thumb_h)
 thumb_npart = gconfig['thumbnail']['npart']
 thumb_fmt = '.jpg'
-thumb_fmtparam = [int(cv2.IMWRITE_JPEG_QUALITY), 50]
+thumb_fmtparam = [int(cv2.IMWRITE_JPEG_QUALITY), gconfig['thumbnail']['jpg_quality']]
 
 subthumb_h = gconfig['subthumb']['height']
 subthumb_fmt = '.jpg'
-subthumb_fmtparam = [int(cv2.IMWRITE_JPEG_QUALITY), 80]
+subthumb_fmtparam = [int(cv2.IMWRITE_JPEG_QUALITY), gconfig['subthumb']['jpg_quality']]
 
 frame_fmt = '.bmp'
 frame_fmtparam = None
@@ -364,7 +401,7 @@ def createocr(engine, h):
 
 def run_ocrjob():
     global ocr_stop
-    cap = open_video()
+    cap = VideoReader()
     with connect_db() as conn:
         c = conn.cursor()
 
@@ -386,8 +423,13 @@ def run_ocrjob():
             lines.reverse()
             while True:
                 if ocr_stop:
+                    cap.writelog(conn)
+                    msg = ocr.done()
+                    if msg:
+                        log(msg, 'I', db=conn)
                     log('OCR任务已暂停', 'W', db=conn)
                     conn.commit()
+                    cap.close()
                     return
                 # show status
                 if len(lines) == 0 or (time.time() - period_start) > 5:
@@ -422,10 +464,7 @@ def run_ocrjob():
                 parts = []
                 subthumbs = []
                 for id, engine, top, bottom, frame_id in batch:
-                    if cap.get(cv2.CAP_PROP_POS_FRAMES) != frame_id:
-                        cap.set(cv2.CAP_PROP_POS_FRAMES, frame_id)
-                    succ, img = cap.read()
-                    assert succ
+                    img = cap.read(frame_id)
                     img = img[top:bottom]
                     parts.append(img)
                     w = int(width / (bottom-top) * subthumb_h)
@@ -450,12 +489,14 @@ def run_ocrjob():
                 conn.commit()
                 thread_yield()
         
+        cap.writelog(conn)
         msg = ocr.done()
         if msg:
             log(msg, 'I', db=conn)
         msg = 'OCR任务已完成(空项数%d)'%emptycnt if errcnt == 0 else 'OCR任务已完成(空项数%d)，但有%d个错误发生，请使用“继续OCR”功能来重试错误项'%(emptycnt,errcnt)
         log(msg, 'S', db=conn)
         conn.commit()
+        cap.close()
 
 ocr_thread = None
 def startocr():
@@ -472,7 +513,7 @@ def startocr():
 
 
 def make_thumbnail():
-    cap = open_video()
+    cap = VideoReader()
     with connect_db() as conn:
         c = conn.cursor()
         if getconfig(conn, 'thumb_h') != thumb_h:
@@ -481,14 +522,11 @@ def make_thumbnail():
         start = c.execute('SELECT MAX(frame_id) + 1 FROM thumbnail').fetchone()[0]
         start = 0 if start is None else start
         if start < nframes - 1:
-            cap.set(cv2.CAP_PROP_POS_FRAMES, start)
             for part_start in range(start, nframes, thumb_npart):
                 parts = []
                 frame_ids = []
                 for i in range(part_start, min(part_start + thumb_npart, nframes)):
-                    assert i == int(cap.get(cv2.CAP_PROP_POS_FRAMES))
-                    succ, img = cap.read()
-                    assert succ
+                    img = cap.read(i)
                     img = cv2.resize(img, (thumb_w, thumb_h), interpolation=cv2.INTER_AREA)
                     parts.append(img)
                     frame_ids.append(i)
@@ -498,8 +536,10 @@ def make_thumbnail():
                     log('生成缩略图: %d%%' % int(part_start / nframes * 100), db=conn)
                     conn.commit()
                 thread_yield()
+            cap.writelog(conn)
             log('生成缩略图已完成', 'I', db=conn)
             conn.commit()
+    cap.close()
 
 def checkwaitocr(db):
     if db.cursor().execute("SELECT COUNT(id) FROM ocrresult WHERE state == 'waitocr'").fetchone()[0]:
@@ -573,9 +613,9 @@ def serve_img():
 @app.route('/frame')
 def serve_frame():
     frame_id = flask.request.args.get('id', type=int)
-    cap.set(cv2.CAP_PROP_POS_FRAMES, frame_id)
-    succ, frame = cap.read()
-    assert succ
+    frame = cap.read(frame_id)
+    if cap.writelog(conn):
+        conn.commit()
     succ, blob = cv2.imencode(frame_fmt, frame, frame_fmtparam)
     assert succ
     return flask.Response(blob.tobytes(), mimetype=mime[frame_fmt])
