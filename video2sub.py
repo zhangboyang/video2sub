@@ -23,6 +23,10 @@ import numpy as np
 sys.stdout.reconfigure(errors='replace')
 sys.stderr.reconfigure(errors='replace')
 
+if len(sys.argv) != 2:
+    print('请使用launcher启动器')
+    print('若要手动启动后端，请指定视频文件名')
+    sys.exit(0)
 video = sys.argv[1]
 
 gconfig = ast.literal_eval(open('config.txt', 'r', encoding='utf_8_sig').read())

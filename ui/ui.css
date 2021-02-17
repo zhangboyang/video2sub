@@ -375,7 +375,7 @@ table td, table th {
 #text {
   flex: 1;
   overflow-y: scroll;
-  min-height: 10px;
+  min-height: 5px;
 }
 #text > div {
   padding: 0 10px;

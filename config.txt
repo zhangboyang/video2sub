@@ -56,7 +56,7 @@
         'SECRET_KEY': 'PQ2ukO4Aec2PTsgQU9UkiEKYciavlZk8',
 
         'qps_limit': 2,   # 每秒调用次数限制
-        'batch_size': 30, # 批处理大小
+        'batch_size': 20, # 批处理大小
         'language_type': 'CHN_ENG', # 语言类型，参见 https://ai.baidu.com/ai-doc/OCR/1k3h7y3db
 
         'TOKEN_URL': 'https://aip.baidubce.com/oauth/2.0/token',
