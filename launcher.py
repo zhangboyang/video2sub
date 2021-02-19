@@ -82,7 +82,7 @@ def run_frontend():
         f.seek(0)
         f.truncate()
         json.dump(conf, f)
-    frontend = subprocess.Popen(exe(os.path.join(apppath, appexe)), close_fds=True)
+    frontend = subprocess.Popen(exe(os.path.join(apppath, appexe)) + ['--disable-smooth-scrolling'], close_fds=True)
 
 def api(path, data=b'', retry=True):
     while True:

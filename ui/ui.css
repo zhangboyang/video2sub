@@ -23,7 +23,7 @@ a.button {
   position: relative;
   background-color: white;
   border: 1px solid gray;
-  padding: 2px;
+  padding: 2px 3px;
   text-align: center;
 }
 a.button:hover {
@@ -182,7 +182,7 @@ div.toolbox > div.text {
   float: left;
 }
 #ocrinfo {
-  width: 100px;
+  max-width: 120px;
 }
 
 #editor {
@@ -254,7 +254,7 @@ div.toolbox > div.text {
 }
 #timebar > #mouselabel {
   margin-left: 10px;
-  color: green;
+  color: black;
   z-index: 2;
 }
 #timebar > canvas {
@@ -300,12 +300,19 @@ div.toolbox > div.text {
 #op > div > div {
   display: block;
   padding: 2px 10px;
+  height: 26px;
 }
 #op > div:not(:first-child) > div {
   border-left: 1px solid black;
 }
 #op > div > div:not(:first-child) {
   border-top: 1px solid black;
+}
+#op #export {
+  background-color: white;
+}
+#op #export a.button {
+  color:rgb(0, 80, 0);
 }
 
 #codeeditor {
@@ -370,15 +377,61 @@ table {
 table td, table th {
   border: 1px gray solid;
   padding: 2px 5px;
+  vertical-align: top;
+}
+table tr:first-child th, table tr:first-child td {
+  border-top: 0;
+}
+table td:first-child, table th:first-child {
+  border-left: 0;
+}
+table td:last-child, table th:last-child {
+  border-right: 0;
+}
+table tr:last-child td {
+  border-bottom: 0;
 }
 
+#tblarea {
+  flex: 1;
+  display: flex;
+  flex-direction: column;
+  min-height: 5px;
+}
+#tblsummary {
+  padding: 2px 10px;
+  border-top: 1px solid gray;
+}
+#tblop {
+  display: flex;
+  border-bottom: 1px solid black;
+  user-select: none;
+}
+#tblop > div {
+  padding: 2px 4px;
+}
+#tblop > div:not(:first-child) {
+  border-left: 1px solid black;
+}
+#tblhint > span {
+  color: green;
+}
+#tblop select {
+  border: 1px solid black;
+  background-color: azure;
+  padding: 2px;
+  width: 100px;
+}
+#tblfltcustom {
+  flex: 1;
+  margin: 2px;
+  padding: 2px;
+  border: 1px solid black;
+  font-family: monospace;
+}
 #text {
   flex: 1;
   overflow-y: scroll;
-  min-height: 5px;
-}
-#text > div {
-  padding: 0 10px;
 }
 #text > table {
   width: 100%;
@@ -391,13 +444,7 @@ table td, table th {
 }
 #text > table td:nth-child(4) {
   width: 100%;
-  white-space: pre;
-}
-#text > table td:nth-child(1) {
-  cursor: pointer;
-  text-decoration: underline;
-  color: blue;
-  user-select: none;
+  white-space: pre-wrap;
 }
 #text > table tr[data-state='waitocr'] {
   background-color: lightgray;
@@ -411,8 +458,11 @@ table td, table th {
 #text > table tbody tr:hover {
   background-color: lemonchiffon !important;
 }
-#text > table tr[data-tag~='sticky'] td:nth-child(2) {
+#text > table tr td:nth-child(1) {
   color: gray;
+}
+#text > table tr[data-tag~='primary'] td:nth-child(1) {
+  color: black;
 }
 #text > table tr[data-state='done'][data-tag~='sel'] {
   background-color: rgb(130, 215, 255);
@@ -450,19 +500,22 @@ table td, table th {
 }
 
 
-#logbar > div.buttonbar {
+#logarea {
+  overflow: hidden;
+}
+#logarea > div.buttonbar {
   display: inline-block;
   position: absolute;
   right: 32px;
   bottom: 5px;
   text-align: right;
 }
-#logbar > div.buttonbar .button {
+#logarea > div.buttonbar .button {
   margin: 2px 0;
 }
 #logs {
-  height: 100%;
   width: 100%;
+  height: 100%;
   overflow-y: scroll;
 }
 #logs > table {
@@ -488,6 +541,7 @@ table td, table th {
 }
 #logs > table td:last-child {
   width: 100%;
+  white-space: pre-wrap;
 }
 
 #promptbg {
@@ -499,8 +553,8 @@ table td, table th {
 #promptdialog {
   border: 1px solid black;
   background-color: white;
-  width: 300px;
-  height: 150px;
+  width: 350px;
+  height: 160px;
   position: absolute;
   margin: auto;
   z-index: 20;
@@ -511,6 +565,7 @@ table td, table th {
 }
 #promptdialog > div:nth-child(1) {
   padding: 10px;
+  white-space: pre-wrap;
 }
 #promptdialog > div:nth-child(2) {
   flex: 1;

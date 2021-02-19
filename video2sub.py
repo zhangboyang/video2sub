@@ -1,6 +1,7 @@
 #!/usr/bin/env python3
 import ast
 import flask
+from flask.json import jsonify
 import werkzeug
 import sys
 import sqlite3
@@ -16,6 +17,7 @@ import secrets
 import functools
 import csv
 import io
+import math
 from threading import Thread
 from cv2 import cv2  # make VSCode happy
 import numpy as np
@@ -185,7 +187,7 @@ def db2json(db, sql, *param):
         'row': row,
     })
 
-def checkpoint(message):
+def checkpoint(message, generate_log=True):
     dump = zlib.compress(
         json.dumps(
             c.execute('SELECT * FROM ocrresult').fetchall(),
@@ -193,8 +195,10 @@ def checkpoint(message):
         level=1)
     c.execute("INSERT INTO checkpoint (date, message, data) VALUES (datetime('now','localtime'), ?, ?)", (message, dump))
     checkpoint_id = c.lastrowid
-    log('已创建恢复点 #%d (%s)'%(checkpoint_id, message), 'C', checkpoint_id=checkpoint_id, db=conn)
-    print('checkpoint #%d is %.2fKB (gzip)' % (checkpoint_id, len(dump)/1024))
+    if generate_log:
+        log('已创建恢复点 #%d (%s)'%(checkpoint_id, message), 'C', checkpoint_id=checkpoint_id, db=conn)
+    print('checkpoint #%d (%s) is %.2fKB (gzip)' % (checkpoint_id, message, len(dump)/1024))
+    return checkpoint_id
 
 def rollback(checkpoint_id):
     msg, dump = c.execute('SELECT message, data FROM checkpoint WHERE checkpoint_id = ?', (checkpoint_id,)).fetchone()
@@ -246,7 +250,7 @@ class ImageVConcat:
         #print(left, top, right, bottom, ocrtext, comment)
         for i in range(top, bottom):
             if i in self.hdict:
-                self.hdict[i].append((left, right, ocrtext, comment))
+                self.hdict[i].append((top, bottom, left, right, ocrtext, comment))
     def getresult(self):
         result = []
         for h0 in range(0, 2*self.h*self.n, 2*self.h):
@@ -254,8 +258,8 @@ class ImageVConcat:
             for i in range(h0, h0 + self.h):
                 print(h0, self.hdict[i])
                 s.update(self.hdict[i])
-            ocrtext = ' '.join([ocrtext for left, right, ocrtext, comment in sorted(s)])
-            comment = '#'.join([comment for left, right, ocrtext, comment in sorted(s)])
+            ocrtext = '\\N'.join([ocrtext for top, bottom, left, right, ocrtext, comment in sorted(s)])
+            comment = '#'.join([comment for top, bottom, left, right, ocrtext, comment in sorted(s)])
             result.append(('done', ocrtext, comment))
         return result
 
@@ -339,7 +343,7 @@ class BaiduOcr:
                         vcat.addresult(left, top, right, bottom, words_result["words"], str(words_result))
                     results = vcat.getresult()
                 else:
-                    results.append(('done', ' '.join([words_result["words"] for words_result in result_json["words_result"]]), str(result_json)))
+                    results.append(('done', '\\N'.join([words_result["words"] for words_result in result_json["words_result"]]), str(result_json)))
             except Exception:
                 traceback.print_exc()
                 if self.use_batch:
@@ -373,7 +377,7 @@ class ChineseOcr:
                 data = b'{"imgString":"data:%s;base64,%s","textAngle":false,"textLine":%s}' % (mime[format].encode(), base64.b64encode(blob.tobytes()), self.textLine)
                 req = urllib.request.urlopen(gconfig['chineseocr']['url'], data, timeout=5)
                 rsp = json.load(req)
-                result = ('done', '\n'.join([item['text'] for item in rsp['res']]))
+                result = ('done', '\\N'.join([item['text'] for item in rsp['res']]))
             except Exception:
                 traceback.print_exc()
                 result = ('error', None)
@@ -627,7 +631,7 @@ def serve_frame():
 @app.route('/thumbnail', methods=['POST'])
 @session_header_required
 def serve_thumbnail():
-    return db2json(conn, 'SELECT frame_id, imgdb.* FROM thumbnail JOIN imgdb ON thumbnail.imgdb_id = imgdb.imgdb_id ORDER BY frame_id')
+    return db2json(conn, 'SELECT frame_id, imgdb.* FROM thumbnail JOIN imgdb USING (imgdb_id) ORDER BY frame_id')
 
 @app.route('/logs', methods=['POST'])
 @session_header_required
@@ -669,7 +673,7 @@ def serve_exportass():
         conn.commit()
         return ''
     def sec2str(sec):
-        sec100 = round(sec * 100)
+        sec100 = math.ceil(sec*100)
         fs = sec100 % 100
         s = sec100 // 100 % 60
         m = sec100 // 100 // 60 % 60
@@ -702,7 +706,7 @@ def serve_exportass():
 def serve_exportcsv():
     outfile = video + '.export.csv'
     output = io.StringIO()
-    row = c.execute('SELECT * FROM ocrresult').fetchall()
+    row = c.execute('SELECT * FROM ocrresult ORDER BY frame_start,frame_end,top,bottom,engine,id').fetchall()
     col = [x[0] for x in c.description]
     w = csv.writer(output)
     w.writerow(col)
@@ -752,6 +756,7 @@ def serve_importcsv():
     inscnt = c.rowcount
     log('导入CSV文件成功，修改了%d条字幕，新增了%d条字幕'%(updcnt,inscnt), 'S', db=conn)
     conn.commit()
+    return ''
 
 @app.route('/checkpoint', methods=['POST'])
 @session_header_required
@@ -813,24 +818,36 @@ def serve_allengines():
 @session_header_required
 def serve_updateresult():
     data = flask.request.get_json()
+    checkpoint_id = None
     if data['checkpoint']:
-        checkpoint(data['checkpoint'])
+        checkpoint_id = checkpoint(data['checkpoint'], not data['compatlog'])
     cols = [x[0] for x in c.execute("SELECT name FROM pragma_table_info('ocrresult')").fetchall() if x[0] != 'id']
-    values = []
+    upd = []
+    ins = []
     for item in data['changes']:
-        values.append(tuple([item[col] for col in cols] + [item['id']]))
-    sql = 'UPDATE ocrresult SET ' + ','.join([col + ' = ?' for col in cols]) + ' WHERE id = ?'
-    c.executemany(sql, values)
+        if item['id'] > 0:
+            upd.append(tuple([item[col] for col in cols] + [item['id']]))
+        else:
+            ins.append(tuple([item[col] for col in cols]))
+    c.executemany('UPDATE ocrresult SET ' + ','.join([c + ' = ?' for c in cols]) + ' WHERE id = ?', upd)
+    updcnt = c.rowcount
+    c.executemany('INSERT INTO ocrresult (' + ','.join([c for c in cols]) + ') VALUES (' + ','.join(['?' for c in cols]) + ')', ins)
+    inscnt = c.rowcount
     c.execute("DELETE FROM ocrresult WHERE state = 'delete'")
+    delcnt = c.rowcount
     if data['message']:
-        log(data['message'], 'S', db=conn)
+        log(data['message'], 'S', db=conn, checkpoint_id=checkpoint_id if data['compatlog'] else None)
     conn.commit()
-    return ''
+    return flask.jsonify({
+        'updcnt': updcnt,
+        'inscnt': inscnt,
+        'delcnt': delcnt,
+    })
 
 @app.route('/loadresult', methods=['POST'])
 @session_header_required
 def serve_loadresult():
-    return db2json(conn, 'SELECT * FROM ocrresult LEFT JOIN imgdb ON ocrresult.imgdb_id == imgdb.imgdb_id')
+    return db2json(conn, 'SELECT * FROM ocrresult LEFT JOIN imgdb USING (imgdb_id)')
 
 @app.route('/startocr', methods=['POST'])
 @session_header_required
@@ -889,46 +906,48 @@ def serve_continueocr():
         conn.commit()
         return ''
     data = flask.request.get_json()
-    frame_start = data['ocr_start']
-    frame_end = data['ocr_end']
+    c.execute('DROP TABLE IF EXISTS temp.ocrrange')
+    c.execute('CREATE TEMPORARY TABLE temp.ocrrange (id INTEGER PRIMARY KEY)')
+    c.executemany('INSERT INTO temp.ocrrange VALUES (?)', [(id,) for id in data['ocr_range']])
     restarttype = data['restarttype']
     new_engine = json.loads(getconfig(conn, 'OCR'))['engine']
     if restarttype == '':
         errcnt = c.execute("""
-            SELECT COUNT(id) FROM ocrresult WHERE
-                (state = 'error' OR state = 'waitocr') AND
-                (? <= frame_start AND frame_start < ?)""", (frame_start, frame_end)).fetchone()[0]
+            SELECT COUNT(id) FROM ocrresult WHERE EXISTS (SELECT * FROM temp.ocrrange WHERE ocrresult.id = temp.ocrrange.id) AND
+                (state = 'error' OR state = 'waitocr')""").fetchone()[0]
         if errcnt == 0:
             log('没有任务要做', db=conn)
+            c.execute('DROP TABLE IF EXISTS temp.ocrrange')
             conn.commit()
             return ''
         checkpoint('执行“继续OCR”之前')
-        c.execute("UPDATE ocrresult SET state = 'waitocr', engine = ? WHERE (state = 'waitocr' OR state = 'error') AND (? <= frame_start AND frame_start < ?)", (new_engine, frame_start, frame_end))
+        c.execute("UPDATE ocrresult SET state = 'waitocr', engine = ? WHERE (state = 'waitocr' OR state = 'error') AND EXISTS (SELECT * FROM temp.ocrrange WHERE ocrresult.id = temp.ocrrange.id)", (new_engine,))
     elif restarttype == 'all':
         donecnt = c.execute("""
-            SELECT COUNT(id) FROM ocrresult WHERE
-                (state = 'waitocr' OR state = 'error' OR state = 'waitocr' OR state = 'done') AND
-                (? <= frame_start AND frame_start < ?)""", (frame_start, frame_end)).fetchone()[0]
+            SELECT COUNT(id) FROM ocrresult WHERE EXISTS (SELECT * FROM temp.ocrrange WHERE ocrresult.id = temp.ocrrange.id) AND
+                (state = 'waitocr' OR state = 'error' OR state = 'waitocr' OR state = 'done')""").fetchone()[0]
         if donecnt == 0:
             log('没有任务要做', db=conn)
+            c.execute('DROP TABLE IF EXISTS temp.ocrrange')
             conn.commit()
             return ''
         checkpoint('执行“重新OCR”之前')
-        c.execute("UPDATE ocrresult SET state = 'waitocr', engine = ? WHERE (state = 'waitocr' OR state = 'error' OR state = 'waitocr' OR state = 'done') AND (? <= frame_start AND frame_start < ?)", (new_engine, frame_start, frame_end))
+        c.execute("UPDATE ocrresult SET state = 'waitocr', engine = ? WHERE (state = 'waitocr' OR state = 'error' OR state = 'waitocr' OR state = 'done') AND EXISTS (SELECT * FROM temp.ocrrange WHERE ocrresult.id = temp.ocrrange.id)", (new_engine,))
     elif restarttype == 'empty':
         emptycnt = c.execute("""
-            SELECT COUNT(id) FROM ocrresult WHERE
-                (state = 'done' AND ocrtext = '') AND
-                (? <= frame_start AND frame_start < ?)""", (frame_start, frame_end)).fetchone()[0]
+            SELECT COUNT(id) FROM ocrresult WHERE EXISTS (SELECT * FROM temp.ocrrange WHERE ocrresult.id = temp.ocrrange.id) AND
+                (state = 'done' AND ocrtext = '')""").fetchone()[0]
         if emptycnt == 0:
             log('没有任务要做', db=conn)
+            c.execute('DROP TABLE IF EXISTS temp.ocrrange')
             conn.commit()
             return ''
         checkpoint('执行“空项OCR”之前')
-        c.execute("UPDATE ocrresult SET state = 'waitocr', engine = ? WHERE (state = 'done' AND ocrtext = '') AND (? <= frame_start AND frame_start < ?)", (new_engine, frame_start, frame_end))
+        c.execute("UPDATE ocrresult SET state = 'waitocr', engine = ? WHERE (state = 'done' AND ocrtext = '') AND EXISTS (SELECT * FROM temp.ocrrange WHERE ocrresult.id = temp.ocrrange.id)", (new_engine,))
     else:
         assert False
     log('OCR任务已提交', db=conn)
+    c.execute('DROP TABLE IF EXISTS temp.ocrrange')
     conn.commit()
     startocr()
     return 'ok'

@@ -17,8 +17,8 @@
           <div id="framearea" :style="{ height: (getdisph()+27)+'px' }">
             <div id="frameleft">
               <div class="toolbox neighborframe">
-                <strong>上一帧 ({{pos-1}})</strong>
-                <imgdb v-if="pos>0" :src="ziprowidx(thumbnail, pos-1)" @click.native="setframepos(pos-1,1)"></imgdb>
+                <strong ref="prevframe">上一帧 ({{pos-1}})</strong>
+                <imgdb v-if="pos>0" :src="ziprowidx(thumbnail, pos-1)" @my-load="imgload($refs.prevframe)" @click.native="setframepos(pos-1,1)"></imgdb>
                 <div v-else :style="{ height: info.thumb_h+'px', width: info.thumb_w+'px', 'line-height': info.thumb_h+'px', 'text-align': 'center' }">无</div>
               </div>
               <div id="dispsize" class="toolbox">
@@ -31,25 +31,28 @@
               </div>
             </div>
             <div id="framebox">
-              <div id="frametitle" class="toolbox"><strong>当前帧 ({{pos}})</strong></div>
+              <div id="frametitle" class="toolbox"><strong ref="curframe">当前帧 ({{pos}})</strong></div>
               <div id="frame" :style="{ width: getdispw()+'px', height: getdisph()+'px' }">
-                <img v-if="getdisph()!=info.thumb_h" :src="'/frame?id='+pos" draggable="false" />
-                <imgdb v-else :src="ziprowidx(thumbnail, pos)"></imgdb>
-                <div id="ocrarea" v-if="ocrsel[0]>=0||cureditocrsel!==null" :style="{ top: y2percent((cureditocrsel?cureditocrsel:ocrsel)[0]), height: y2percent((cureditocrsel?cureditocrsel:ocrsel)[1]+1-(cureditocrsel?cureditocrsel:ocrsel)[0]), outline: cureditocrsel ? '1px solid gold' : '1px solid #00ff00', 'border-color': cureditocrsel ? 'transparent gold' : 'transparent green' }"></div>
+                <img v-if="getdisph()!=info.thumb_h" :src="'/frame?id='+pos" @load="imgload($refs.curframe)" draggable="false" />
+                <imgdb v-else :src="ziprowidx(thumbnail, pos)" @my-load="imgload($refs.curframe)"></imgdb>
+                <div id="ocrarea" v-if="ocrsel[0]>=0" :style="{ top: y2percent(ocrsel[0]), height: y2percent(ocrsel[1]+1-ocrsel[0]), outline: ocrselmode ? '1px solid gold' : '1px solid #00ff00', 'border-color': ocrselmode ? 'transparent gold' : 'transparent green' }"></div>
                 <div ref="frameevent" id="frameevent" @mousemove="framemousemove" @mouseleave="mousexy=[-1,-1]" @mousedown="framemousedown"></div>
               </div>
             </div>
             <div id="frameright">
               <div class="toolbox neighborframe">
-                <strong>下一帧 ({{pos+1}})</strong>
-                <imgdb v-if="pos<info.nframes-1" :src="ziprowidx(thumbnail, pos+1)" @click.native="setframepos(pos+1,1)"></imgdb>
+                <strong ref="nextframe">下一帧 ({{pos+1}})</strong>
+                <imgdb v-if="pos<info.nframes-1" :src="ziprowidx(thumbnail, pos+1)" @my-load="imgload($refs.nextframe)" @click.native="setframepos(pos+1,1)"></imgdb>
                 <div v-else :style="{ height: info.thumb_h+'px', width: info.thumb_w+'px', 'line-height': info.thumb_h+'px', 'text-align': 'center' }">无</div>
               </div>
-              <div id="ocrinfo" class="toolbox" @click="inputocrsel">
-                <strong>OCR区域</strong>
+              <div id="ocrinfo" class="toolbox">
+                <strong>{{ocrselmode?'选中的字幕':'新生成字幕'}}<br>OCR区域</strong>
                 <div class="text">
-                  <span v-if="ocrsel[0]<0">请在图片上用左键拖动，或单击此框来指定字幕的范围</span>
+                  <span v-if="ocrsel[0]<0">请在图片上用左键拖动，或手工输入来指定字幕的范围</span>
                   <span v-else>y1={{ocrsel[0]}}<br>y2={{ocrsel[1]}}</span>
+                </div>
+                <div class="text">
+                  <a @click.prevent="inputocrsel">手工输入</a>
                 </div>
                 <div class="text" v-if="mousexy[0]>=0">
                   x={{mousexy[0]}}<br>
@@ -61,20 +64,22 @@
           <div id="editor">
             <div>
               <div>
-                <a class="button" @click.prevent="editorfontsize=Math.min(editorfontsize+1,50)">调大字体<div class="bl">让右侧文本框文字变大</div></a>
-                <a class="button" @click.prevent="editorfontsize=Math.max(editorfontsize-1,16)">调小字体<div class="bl">让右侧文本框文字变小</div></a>
+                <a class="button" @click.prevent="editorfontsize=Math.min(editorfontsize+1,50)">显示＋<div class="bl">让右侧文本框文字变大</div></a>
+                <a class="button" @click.prevent="editorfontsize=Math.max(editorfontsize-1,16)">显示－<div class="bl">让右侧文本框文字变小</div></a>
+                <a class="button" @click.prevent="jumppos(0)">起始帧<div class="bl">显示本条字幕的第一帧</div></a>
+                <a class="button" @click.prevent="jumppos(1)">结束帧<div class="bl">显示本条字幕的最后一帧</div></a>
               </div>
             </div>
-            <input type="text" ref="editbox" @keydown="editorkeydown" :style="{ width: Math.round(info.width*Math.max(framescale, 360/info.height))+'px', 'font-size': editorfontsize+'px' }">
+            <input type="text" ref="editbox" @keydown="editorkeydown" :style="{ width: Math.round(info.width*Math.max(framescale, 360/info.height))+'px', 'font-size': editorfontsize+'px' }" spellcheck="false">
             <div>
               <div>
-                <a class="button" @click.prevent="jumpprev">前<div class="bl">转到上一条字幕<br>快捷键：<br>&emsp;方向键上<br>或鼠标滚轮上</div></a>
-                <a class="button" @click.prevent="jumpnext">后<div class="br">转到下一条字幕<br>快捷键：<br>&emsp;方向键下<br>或Enter<br>或鼠标滚轮下</div></a>
-                <a class="button" @click.prevent="mergeprev">与上条合并<div class="br">丢弃当前文本，将本条合并到上一条<br>并转到下一条字幕<br>快捷键：Ctrl+Enter</div></a>
+                <a class="button" @click.prevent="jumpprev">上一条<div class="bl">跳转到上一条字幕<br>快捷键：<br>&nbsp;方向键上<br>&nbsp;或鼠标滚轮上</div></a>
+                <a class="button" @click.prevent="jumpnext">下一条<div class="br">跳转到下一条字幕<br>快捷键：<br>&nbsp;方向键下<br>&nbsp;或Enter<br>&nbsp;或鼠标滚轮下</div></a>
+                <a class="button" @click.prevent="mergeprev">与上条合并<div class="br">丢弃当前文本，将本条合并到上一条<br>并跳转到下一条字幕<br>快捷键：Ctrl+Enter</div></a>
               </div>
             </div>
           </div>
-          <imgdb v-if="mousepos>=0" id="thumbnail" :style="{ left: pos2percent(mousepos) }" :src="ziprowidx(thumbnail, mousepos)"></imgdb>
+          <imgdb v-if="mousepos>=0" id="thumbnail" :style="{ left: pos2percent(mousepos,info.thumb_w) }" :src="ziprowidx(thumbnail, mousepos)"></imgdb>
         </div>
         <div id="timebar" @click="setpos" @mousemove="setmousepos" @mouseleave="mousepos=-1" @mousedown="mouseposdown=1">
           <div id="barbg" ref="barbg"></div>
@@ -82,67 +87,86 @@
           <canvas ref="canvas"></canvas>
           <div id="posmarker" :style="{ left: pos2percent(pos) }"></div>
           <div id="mousemarker" v-if="mousepos>=0" :style="{ left: pos2percent(mousepos) }"></div>
-          <div id="mouselabel" v-if="mousepos>=0" :style="{ left: pos2percent(mousepos) }">{{mousepos}}</div>
+          <div id="mouselabel" v-if="mousepos>=0" :style="{ left: pos2percent(mousepos, 80) }">{{mousepos}}</div>
         </div>
-        <div ref="text" id="text" @click="jumpnull">
-          <table id="ocrresult">
-            <thead>
-              <tr>
-                <th>范围</th>
-                <th>帧范围</th>
-                <th>引擎(OCR区域)</th>
-                <th>文本</th>
-                <th>预览</th>
-              </tr>
-            </thead>
-            <tbody></tbody>
-          </table>
-          <div>共{{nresult}}条字幕</div>
+        <div id="tblarea">
+          <div id="tblop">
+            <div id="tblhint" @click="tblselnone">单击:<span>选择</span> / Ctrl+单击:<span>多选</span> / Shift+单击:<span>选择范围</span></div>
+            <div id="tblsort">
+              排序
+              <select v-model="tblsort">
+                <option v-for="i in tblsortfunc" :value="i[1]">{{i[0]}}</option>
+              </select>
+            </div>
+            <div id="tblfilter">
+              筛选
+              <select v-model="tblflt">
+                <option v-for="i in tblfltfunc" :value="i[1]">{{i[0]}}</option>
+              </select>
+            </div>
+            <input id="tblfltcustom" type="text" v-model="tblflt" :style="{'background-color':tblflterr?'lightpink':'azure'}" title="自定义JavaScript表达式，具体参数详见“执行自定义脚本”功能" spellcheck="false">
+          </div>
+          <div id="text">
+            <table id="ocrresult" @click="tblselnone">
+              <thead>
+                <tr>
+                  <th title="frame_start, frame_end">帧范围</th>
+                  <th title="top, bottom">OCR区域</th>
+                  <th title="engine">引擎</th>
+                  <th title="ocrtext">文本</th>
+                  <th>预览</th>
+                </tr>
+              </thead>
+              <tbody></tbody>
+            </table>
+            <div id="tblsummary" @click="tblselnone">{{tblinfo}}</div>
+          </div>
         </div>
         <div id="op">
           <div>
             <div>
-              范围：
-              <input type="text" v-model.number="timesel[0]" :style="{ 'background-color': timesel[0]==0 ? 'greenyellow' : 'rgb(130, 215, 255)' }">
-              至
-              <input type="text" v-model.number="timesel[1]" :style="{ 'background-color': timesel[1]==info.nframes-1 ? 'greenyellow' : 'rgb(130, 215, 255)' }">
-              <a class="button" @click.prevent="timesel=[0,info.nframes-1]">使用全部<div class="bl">设置操作范围为全部帧</div></a>
-            </div>
-            <div>
-              <a class="button" @click.prevent="exportass">导出ASS<div class="bl">导出为ASS字幕文件</div></a>
+              选中：<span>{{selinfo}}</span><span style="color:gray">{{selinfo2}}</span>
               <span style="float: right">
-                <a class="button" @click.prevent="exportcsv">导出CSV<div class="bl">导出为CSV表格文件</div></a>
-                <label for="csvfile0"><a class="button">导入CSV<div class="bl">用CSV文件中的数据更新已有字幕<br>文件中id列被设为0的字幕将作为新字幕项插入</div></a></label>
-                <input type="file" ref="csvfile0" id="csvfile0" accept=".csv" @change="importcsv(0)">
-                <label for="csvfile1"><a class="button">添加CSV<div class="bl">将CSV文件中的数据添加为新字幕项<br>相当于文件中所有字幕id均被设为0</div></a></label>
-                <input type="file" ref="csvfile1" id="csvfile1" accept=".csv" @change="importcsv(1)">
+                <a class="button" @click.prevent="tblselnone">不选<div class="bl">取消选择所有字幕</div></a>
+                <a class="button" @click.prevent="tblselall">全选<div class="bl">选择所有字幕</div></a>
               </span>
+            </div>
+            <div id="export">
+              <a class="button" @click.prevent="exportass">导出ASS<div class="bl">导出为ASS字幕文件</div></a>
+              &nbsp;&nbsp;
+              <a class="button" @click.prevent="exportcsv">导出CSV<div class="bl">导出为CSV表格文件</div></a>
+              <label for="csvfile0"><a class="button">导入CSV<div class="bl">用CSV文件中的数据更新已有字幕<br>文件中id列被设为0的字幕将作为新字幕项插入</div></a></label>
+              <input type="file" ref="csvfile0" id="csvfile0" accept=".csv" @change="importcsv(0)">
+              <label for="csvfile1"><a class="button">添加CSV<div class="bl">将CSV文件中的数据添加为新字幕项<br>相当于文件中所有字幕id均被设为0</div></a></label>
+              <input type="file" ref="csvfile1" id="csvfile1" accept=".csv" @change="importcsv(1)">
             </div>
           </div>
           <div>
             <div>
+              脚本：
+              <a class="button" @click.prevent="checkselect()&&runscript(myscript.scripts.find(s=>s.name=='合并相同'))">合并相同<div class="bl">合并相邻且文字完全相同的字幕</div></a>
+              <a class="button" @click.prevent="checkselect()&&runscript(myscript.scripts.find(s=>s.name=='清理'))">清理<div class="bl">删除空字幕、被合并字幕</div></a>
+              &nbsp;
+              <a class="button" @click.prevent="checkselect()&&runscript(myscript.scripts.find(s=>s.name=='强制合并相邻'))">强制合并相邻<div class="bl">合并相邻字幕，不论文字是否相同</div></a>
+              <a class="button" @click.prevent="checkselect()&&runscript(myscript.scripts.find(s=>s.name=='删除'))">删除<div class="bl">删除选中的字幕</div></a>
+              <a class="button" @click.prevent="checkselect()&&runscript(myscript.scripts.find(s=>s.name=='克隆'))">克隆<div class="bl">克隆一份选中的字幕</div></a>
+              &nbsp;
+              <a class="button" @click.prevent="showcodeedit(1)">执行自定义脚本<div class="bl">执行自定义JavaScript脚本</div></a>
+            </div>
+            <div id="engine">
               引擎：
+              <a class="button" @click.prevent="startocr">新OCR<div class="bl">对范围内所有帧，新建一条字幕项并执行OCR<br>一般该操作只需要执行一次</div></a>
               <select v-model="ocrconfig.engine" @change="saveconfig('OCR', ocrconfig, 'OCR引擎已设定为：'+engines.get(ocrconfig.engine))">
                 <option v-for="engine in Array.from(engines.entries())" :value="engine[0]">{{engine[1]}}</option>
               </select>
-              <a class="button" @click.prevent="startocr">新OCR<div class="bl">对范围内所有帧，新建一条字幕项并执行OCR<br>一般该操作只需要执行一次</div></a>
               <a class="button" @click.prevent="stopocr">暂停OCR<div class="bl">暂停当前运行的OCR任务</div></a>
-              <a class="button" @click.prevent="continueocr('')">继续OCR<div class="bl">使用当前设定的引擎，继续上次中断的OCR任务<br>另外还对OCR失败的字幕，重新尝试OCR</div></a>
-              <a class="button" @click.prevent="continueocr('all')">重新OCR<div class="bl">对范围内现有字幕项<br>使用当前设定的引擎重新OCR<br>并替换现有文本</div></a>
-              <a class="button" @click.prevent="continueocr('empty')">空项OCR<div class="bl">对范围内现有文本为空的字幕项<br>使用当前设定的引擎重新OCR</div></a>
-            </div>
-            <div>
-              脚本：
-              <a class="button" @click.prevent="runscript(myscript.scripts.find(s=>s.name=='统计信息'))">统计信息<div class="bl">统计范围内的字幕信息</div></a>
-              <a class="button" @click.prevent="runscript(myscript.scripts.find(s=>s.name=='合并相同'))">合并相同<div class="bl">合并相邻且文字完全相同的字幕</div></a>
-              <a class="button" @click.prevent="runscript(myscript.scripts.find(s=>s.name=='清理'))">清理<div class="bl">删除空字幕、被合并字幕</div></a>
-              <a class="button" @click.prevent="runscript(myscript.scripts.find(s=>s.name=='强制合并相邻'))">强制合并相邻<div class="bl">合并相邻字幕，不论文字是否相同</div></a>
-              <a class="button" @click.prevent="runscript(myscript.scripts.find(s=>s.name=='删除'))">删除<div class="bl">删除范围内所有字幕</div></a>
-              <a class="button" @click.prevent="showcodeedit(1)">执行自定义脚本<div class="bl">执行自定义JavaScript脚本</div></a>
+              <a class="button" @click.prevent="continueocr('')">继续OCR<div class="bl">使用当前设定的引擎，对选中范围内的“等待OCR”字幕和“OCR失败”字幕重新尝试OCR</div></a>
+              <a class="button" @click.prevent="continueocr('all')">重新OCR<div class="bl">使用当前设定的引擎重新OCR选中的字幕，并替换现有文本</div></a>
+              <a class="button" @click.prevent="continueocr('empty')">空项OCR<div class="bl">对选中范围内现有文本为空的字幕项<br>使用当前设定的引擎重新OCR</div></a>
             </div>
           </div>
         </div>
-        <div id="logbar" :style="{ height: morelog ? '200px' : '72px' }">
+        <div id="logarea" :style="{ height: morelog ? '190px' : '60px' }">
           <div class="buttonbar">
             <!--<a class="button" @click.prevent="$refs.logs.scrollTop=0">滚动到顶部</a>
             <a class="button" @click.prevent="$refs.logs.scrollTop=$refs.logs.scrollHeight">滚动到底部</a>
@@ -150,13 +174,13 @@
             <br>-->
             <a class="button" @click.prevent="(checkpointonly^=1)||scrollstatus(),morelog=checkpointonly">{{checkpointonly?'显示所有日志':'只显示恢复点'}}<div class="tr">{{checkpointonly?'在日志栏中显示所有类型日志':'在日志栏中只显示恢复点'}}</div></a>
             <a class="button" @click.prevent="createcheckpoint">创建恢复点<div class="tr">对全部字幕项“存档”，以便需要时“读档”</div></a>
-            <a class="button" @click.prevent="(morelog^=1)||scrollstatus()">显示{{morelog?'更少':'更多'}}日志<div class="tr">{{morelog?'减小':'增大'}}日志栏高度</div></a>
+            <a class="button" @click.prevent="checkpointonly=0,(morelog^=1)||scrollstatus()">显示{{morelog?'更少':'更多'}}日志<div class="tr">{{morelog?'减小':'增大'}}日志栏高度</div></a>
           </div>
           <div ref="logs" id="logs">
             <table>
               <tr v-for="log in ziprowarr(logs)" v-if="!checkpointonly||log.checkpoint_id!==null" :data-level="log.level">
                 <td>{{log.date}}</td>
-                <td>{{log.message}}<span v-if="log.checkpoint_id">&nbsp;<a @click.prevent="rollback(log.checkpoint_id)">撤销至此</a></span></td>
+                <td>{{log.message}}<span v-if="log.checkpoint_id">&nbsp;<a @click.prevent="rollback(log.checkpoint_id)">{{log.level=='C'?'撤销至此':'撤销至此操作之前'}}</a></span></td>
               </tr>
               <tr v-if="waitstatus"><td></td><td>处理中…</td></tr>
               <tr v-if="pageerror" style="background-color: red; color: yellow"><td></td><td>与后端通信失败，请刷新页面重试！！！</td></tr>
@@ -189,14 +213,14 @@
       <div id="promptbg" v-if="myprompt" class="dialogbackground">
         <div id="promptdialog">
           <div>{{myprompt.message}}</div>
-          <div><input type="text" v-model="myprompt.value" ref="promptbox" @keydown="mypromptkeydown"></div>
+          <div><input type="text" v-model="myprompt.value" ref="promptbox" @keydown="mypromptkeydown" spellcheck="false"></div>
           <div>
             <a class="button" @click.prevent="mypromptcancel">取消</a>
             <a class="button" @click.prevent="mypromptok">确定</a>
           </div>
         </div>
       </div>
-      <div id="loading" v-show="!loaded">加载中，请稍候…<br>（若数据较多，加载速度可能会比较慢）</div>
+      <div id="loading" v-show="!loaded">加载中，请稍候…<br><br>若数据较多，加载速度可能会比较慢</div>
     </div>
     <script src="ui.js"></script>
   </body>
