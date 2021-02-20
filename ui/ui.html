@@ -48,7 +48,7 @@
               <div id="ocrinfo" class="toolbox">
                 <strong>{{ocrselmode?'选中的字幕':'新生成字幕'}}<br>OCR区域</strong>
                 <div class="text">
-                  <span v-if="ocrsel[0]<0">请在图片上用左键拖动，或手工输入来指定字幕的范围</span>
+                  <span v-if="ocrsel[0]<0">请在图片上用左键拖动来指定字幕的范围</span>
                   <span v-else>y1={{ocrsel[0]}}<br>y2={{ocrsel[1]}}</span>
                 </div>
                 <div class="text">
@@ -73,9 +73,10 @@
             <input type="text" ref="editbox" @keydown="editorkeydown" :style="{ width: Math.round(info.width*Math.max(framescale, 360/info.height))+'px', 'font-size': editorfontsize+'px' }" spellcheck="false">
             <div>
               <div>
-                <a class="button" @click.prevent="jumpprev">上一条<div class="bl">跳转到上一条字幕<br>快捷键：<br>&nbsp;方向键上<br>&nbsp;或鼠标滚轮上</div></a>
-                <a class="button" @click.prevent="jumpnext">下一条<div class="br">跳转到下一条字幕<br>快捷键：<br>&nbsp;方向键下<br>&nbsp;或Enter<br>&nbsp;或鼠标滚轮下</div></a>
+                <a class="button" @click.prevent="jumpprev">上<div class="bl">跳转到上一条字幕<br>快捷键：<br>&nbsp;方向键上<br>&nbsp;或鼠标滚轮上</div></a>
+                <a class="button" @click.prevent="jumpnext">下<div class="br">跳转到下一条字幕<br>快捷键：<br>&nbsp;方向键下<br>&nbsp;或Enter<br>&nbsp;或鼠标滚轮下</div></a>
                 <a class="button" @click.prevent="mergeprev">与上条合并<div class="br">丢弃当前文本，将本条合并到上一条<br>并跳转到下一条字幕<br>快捷键：Ctrl+Enter</div></a>
+                <a class="button" @click.prevent="advedit">高级编辑<div class="br">直接编辑当前字幕的内部数据</div></a>
               </div>
             </div>
           </div>
@@ -128,7 +129,7 @@
               选中：<span>{{selinfo}}</span><span style="color:gray">{{selinfo2}}</span>
               <span style="float: right">
                 <a class="button" @click.prevent="tblselnone">不选<div class="bl">取消选择所有字幕</div></a>
-                <a class="button" @click.prevent="tblselall">全选<div class="bl">选择所有字幕</div></a>
+                <a class="button" @click.prevent="tblselall">全选<div class="bl">选择筛选后的所有字幕</div></a>
               </span>
             </div>
             <div id="export">
@@ -203,11 +204,21 @@
           <a class="button" @click.prevent="delscript">删除</a>
           <a class="button" @click.prevent="newscript">新建</a>
           <span v-if="scriptsel&&scriptsel.locked" style="color: red">该脚本已锁定，不可更改</span>
+          <span v-else>提示：按Ctrl+Shift+I可打开控制台。</span>
         </div>
         <div id="editordiv" ref="codemirror"></div>
         <div id="codeeditorop">
           <a class="button" @click.prevent="runscript(scriptsel)&&showcodeedit(0)">执行</a>
           <a class="button" @click.prevent="showcodeedit(0)">取消</a>
+        </div>
+      </div>
+      <div id="adveditorbg" v-show="adveditor" class="dialogbackground">
+        <div id="adveditor">
+          <div ref="adveditbox"></div>
+          <div>
+            <a class="button" @click.prevent="adveditcancel">取消</a>
+            <a class="button" @click.prevent="adveditok">确定</a>
+          </div>
         </div>
       </div>
       <div id="promptbg" v-if="myprompt" class="dialogbackground">

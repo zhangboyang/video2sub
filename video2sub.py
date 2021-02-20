@@ -21,15 +21,61 @@ import math
 from threading import Thread
 from cv2 import cv2  # make VSCode happy
 import numpy as np
+if os.name == 'nt':
+    import win32file
+    class FileLock:
+        def __init__(self, path):
+            self.path = path
+            self.handle = None
+            self.shared()
+        def exclusive(self):
+            self.close()
+            self.handle = win32file.CreateFile(self.path, win32file.GENERIC_READ, 0, None, win32file.OPEN_EXISTING, 0, None)
+        def shared(self):
+            self.close()
+            self.handle = win32file.CreateFile(self.path, win32file.GENERIC_READ, win32file.FILE_SHARE_READ, None, win32file.OPEN_EXISTING, 0, None)
+        def close(self):
+            if self.handle is not None:
+                self.handle.Close()
+                self.handle = None
+else:
+    import fcntl
+    class FileLock:
+        def __init__(self, path):
+            self.fd = os.open(path, os.O_RDONLY)
+        def exclusive(self):
+            fcntl.flock(self.fd, fcntl.LOCK_EX | fcntl.LOCK_NB)
+        def shared(self):
+            fcntl.flock(self.fd, fcntl.LOCK_SH | fcntl.LOCK_NB)
+        def close(self):
+            os.close(self.fd)
 
 sys.stdout.reconfigure(errors='replace')
 sys.stderr.reconfigure(errors='replace')
 
-if len(sys.argv) != 2:
+version = '1.0 alpha'
+dbver = 1
+
+if len(sys.argv) != 4:
     print('请使用launcher启动器')
-    print('若要手动启动后端，请指定视频文件名')
-    sys.exit(0)
-video = sys.argv[1]
+    print('若要手动启动后端：')
+    print('  %s [主机名] [端口名] [视频文件名]'%os.path.basename(sys.argv[0]))
+    sys.exit(1)
+host = sys.argv[1]
+port = sys.argv[2]
+video = sys.argv[3]
+
+try:
+    lock = FileLock(video)
+except Exception:
+    print('无法打开文件:', video)
+    sys.exit(1)
+try:
+    lock.exclusive()
+    lock.shared()
+except Exception:
+    print('无法取得文件锁（多开？）')
+    sys.exit(1)
 
 gconfig = ast.literal_eval(open('config.txt', 'r', encoding='utf_8_sig').read())
 
@@ -106,6 +152,22 @@ def frame2sec(n, fps):
 
 conn = connect_db()
 c = conn.cursor()
+c.execute('CREATE TABLE IF NOT EXISTS config (key TEXT PRIMARY KEY, value)')
+
+c.execute("INSERT OR IGNORE INTO config VALUES ('create_date', datetime('now','localtime'))")
+c.execute("INSERT OR IGNORE INTO config VALUES ('create_ver', ?)", (version,))
+
+c.execute("INSERT OR IGNORE INTO config VALUES ('db_ver', ?)", (dbver,))
+if dbver != c.execute("SELECT value FROM config WHERE key = 'db_ver'").fetchone()[0]:
+    print("版本过低，请升级")
+    sys.exit(1)
+
+c.execute("INSERT OR REPLACE INTO config VALUES ('lastopen_date',datetime('now','localtime'))")
+c.execute("INSERT OR REPLACE INTO config VALUES ('lastopen_ver', ?)", (version,))
+
+c.executemany('INSERT OR IGNORE INTO config VALUES (?,?)', [(k, json.dumps(v)) for k, v in gconfig['default'].items()])
+
+
 c.execute('CREATE TABLE IF NOT EXISTS filedb (file_id INTEGER PRIMARY KEY AUTOINCREMENT, format TEXT, data BLOB)')
 c.execute('''
     CREATE TABLE IF NOT EXISTS imgdb (
@@ -115,7 +177,6 @@ c.execute('''
         FOREIGN KEY(file_id) REFERENCES filedb(file_id)
     )''')
 
-c.execute('CREATE TABLE IF NOT EXISTS config (key TEXT PRIMARY KEY, value)')
 c.execute('CREATE TABLE IF NOT EXISTS thumbnail (frame_id INT UNIQUE, imgdb_id INT)')
 c.execute('''
     CREATE TABLE IF NOT EXISTS ocrresult (
@@ -133,10 +194,10 @@ c.execute('''
     )''')
 c.execute('CREATE INDEX IF NOT EXISTS itemstate ON ocrresult (state)')
 
+c.execute('CREATE TABLE IF NOT EXISTS jobrange (id INTEGER PRIMARY KEY)')
+
 c.execute('CREATE TABLE IF NOT EXISTS logs (date TEXT, level CHAR(1), message TEXT, checkpoint_id INTEGER)')
 c.execute('CREATE TABLE IF NOT EXISTS checkpoint (checkpoint_id INTEGER PRIMARY KEY AUTOINCREMENT, date TEXT, message TEXT, data BLOB)')
-
-c.executemany('INSERT OR IGNORE INTO config VALUES (?,?)', [(k, json.dumps(v)) for k, v in gconfig['default'].items()])
 
 conn.commit()
 
@@ -216,7 +277,7 @@ thumb_npart = gconfig['thumbnail']['npart']
 thumb_fmt = '.jpg'
 thumb_fmtparam = [int(cv2.IMWRITE_JPEG_QUALITY), gconfig['thumbnail']['jpg_quality']]
 
-subthumb_h = gconfig['subthumb']['height']
+subthumb_w = gconfig['subthumb']['width']
 subthumb_fmt = '.jpg'
 subthumb_fmtparam = [int(cv2.IMWRITE_JPEG_QUALITY), gconfig['subthumb']['jpg_quality']]
 
@@ -410,101 +471,103 @@ def createocr(engine, h):
 def run_ocrjob():
     global ocr_stop
     cap = VideoReader()
-    with connect_db() as conn:
-        c = conn.cursor()
+    conn = connect_db()
+    c = conn.cursor()
 
-        total = c.execute("SELECT COUNT(id) FROM ocrresult").fetchone()[0]
-        progress = c.execute("SELECT COUNT(id) FROM ocrresult WHERE state != 'waitocr' AND state != 'error'").fetchone()[0]
-        emptycnt = c.execute("SELECT COUNT(id) FROM ocrresult WHERE state != 'waitocr' AND state != 'error' AND ocrtext == ''").fetchone()[0]
-        errcnt = c.execute("SELECT COUNT(id) FROM ocrresult WHERE state == 'error'").fetchone()[0]
+    total = c.execute("SELECT COUNT(id) FROM ocrresult WHERE EXISTS (SELECT * FROM jobrange WHERE ocrresult.id = jobrange.id)").fetchone()[0]
+    progress = c.execute("SELECT COUNT(id) FROM ocrresult WHERE EXISTS (SELECT * FROM jobrange WHERE ocrresult.id = jobrange.id) AND state != 'waitocr' AND state != 'error'").fetchone()[0]
+    emptycnt = c.execute("SELECT COUNT(id) FROM ocrresult WHERE EXISTS (SELECT * FROM jobrange WHERE ocrresult.id = jobrange.id) AND state != 'waitocr' AND state != 'error' AND ocrtext == ''").fetchone()[0]
+    errcnt = c.execute("SELECT COUNT(id) FROM ocrresult WHERE EXISTS (SELECT * FROM jobrange WHERE ocrresult.id = jobrange.id) AND state == 'error'").fetchone()[0]
 
-        period_frames = 0
-        period_start = 0
+    period_frames = 0
+    period_start = 0
 
-        curengine = ''
-        ocr = None
+    curengine = ''
+    ocr = None
 
+    while True:
+        lines = c.execute("SELECT id, engine, top, bottom, frame_start FROM ocrresult WHERE EXISTS (SELECT * FROM jobrange WHERE ocrresult.id = jobrange.id) AND state = 'waitocr' ORDER BY engine, top, frame_start").fetchall()
+        if len(lines) == 0:
+            break
+        lines.reverse()
         while True:
-            lines = c.execute("SELECT id, engine, top, bottom, frame_start FROM ocrresult WHERE state = 'waitocr' ORDER BY engine, top, frame_start").fetchall()
+            if ocr_stop:
+                cap.writelog(conn)
+                msg = ocr.done()
+                if msg:
+                    log(msg, 'I', db=conn)
+                log('OCR任务已暂停', 'W', db=conn)
+                conn.commit()
+                conn.close()
+                cap.close()
+                return
+            # show status
+            if len(lines) == 0 or (time.time() - period_start) > 5:
+                speed = period_frames / (time.time() - period_start)
+                log('OCR任务进度: %.1f%% [总共%d, 完成%d(空项%d), 错误%d, 剩余%d, fps=%.1f]' % (int((progress+errcnt)/total*1000)/10, total, progress, emptycnt, errcnt, total-progress-errcnt, speed), db=conn)
+                conn.commit()
+                period_frames = 0
+                period_start = time.time()
+            
             if len(lines) == 0:
                 break
-            lines.reverse()
-            while True:
-                if ocr_stop:
-                    cap.writelog(conn)
+            
+            # collect batch
+            batch = []
+            _, engine0, top0, bottom0, _ = lines[-1]
+            if engine0 != curengine:
+                curengine = engine0
+                if ocr:
                     msg = ocr.done()
                     if msg:
                         log(msg, 'I', db=conn)
-                    log('OCR任务已暂停', 'W', db=conn)
-                    conn.commit()
-                    cap.close()
-                    return
-                # show status
-                if len(lines) == 0 or (time.time() - period_start) > 5:
-                    speed = period_frames / (time.time() - period_start)
-                    log('OCR任务进度: %.1f%% [总共%d, 完成%d(空项%d), 错误%d, 剩余%d, fps=%.1f]' % (int((progress+errcnt)/total*1000)/10, total, progress, emptycnt, errcnt, total-progress-errcnt, speed), db=conn)
-                    conn.commit()
-                    period_frames = 0
-                    period_start = time.time()
-                
-                if len(lines) == 0:
+                ocr = createocr(engine0, bottom0+1 - top0)
+            while len(lines) > 0 and len(batch) < ocr.ocr_batch:
+                _, engine, top, bottom, _ = lines[-1]
+                if (engine, top, bottom) == (engine0, top0, bottom0):
+                    batch.append(lines.pop())
+                else:
                     break
-                
-                # collect batch
-                batch = []
-                _, engine0, top0, bottom0, _ = lines[-1]
-                if engine0 != curengine:
-                    curengine = engine0
-                    if ocr:
-                        msg = ocr.done()
-                        if msg:
-                            log(msg, 'I', db=conn)
-                    ocr = createocr(engine0, bottom0 - top0)
-                while len(lines) > 0 and len(batch) < ocr.ocr_batch:
-                    _, engine, top, bottom, _ = lines[-1]
-                    if (engine, top, bottom) == (engine0, top0, bottom0):
-                        batch.append(lines.pop())
-                    else:
-                        break
-                print(batch)
-                
-                # process batch
-                parts = []
-                subthumbs = []
-                for id, engine, top, bottom, frame_id in batch:
-                    img = cap.read(frame_id)
-                    img = img[top:bottom]
-                    parts.append(img)
-                    w = int(width / (bottom-top) * subthumb_h)
-                    img = cv2.resize(img, (w, subthumb_h), interpolation=cv2.INTER_AREA)
-                    subthumbs.append(img)
+            print(batch)
+            
+            # process batch
+            parts = []
+            subthumbs = []
+            for id, engine, top, bottom, frame_id in batch:
+                img = cap.read(frame_id)
+                img = img[top:bottom+1]
+                parts.append(img)
+                h = int(subthumb_w * (bottom+1 - top) / width)
+                img = cv2.resize(img, (subthumb_w, h), interpolation=cv2.INTER_AREA)
+                subthumbs.append(img)
 
-                result = ocr.run(parts)  # [ (state, ocrtext, comment)
-                print('\n'.join(['OCR[%d]: %s'%(batch[i][0], result[i] if i < len(result) else None) for i in range(len(batch))]))
-                imgdb_ids = addimages(subthumbs, conn, subthumb_fmt, subthumb_fmtparam)
-                for i, r in enumerate(result):
-                    assert type(r) is tuple
-                    c.execute('UPDATE ocrresult SET %s, imgdb_id = ? WHERE id = ?' %
-                        ', '.join(['state = ?', 'ocrtext = ?', 'comment = ?'][:len(r)]),
-                        r + (imgdb_ids[i], batch[i][0]))
-                    if r[0] == 'error':
-                        errcnt += 1
-                    else:
-                        if r[1] == '':
-                            emptycnt += 1
-                        progress += 1
-                period_frames += len(result)
-                conn.commit()
-                thread_yield()
-        
-        cap.writelog(conn)
-        msg = ocr.done()
-        if msg:
-            log(msg, 'I', db=conn)
-        msg = 'OCR任务已完成(空项数%d)'%emptycnt if errcnt == 0 else 'OCR任务已完成(空项数%d)，但有%d个错误发生，请使用“继续OCR”功能来重试错误项'%(emptycnt,errcnt)
-        log(msg, 'S', db=conn)
-        conn.commit()
-        cap.close()
+            result = ocr.run(parts)  # [ (state, ocrtext, comment)
+            print('\n'.join(['OCR[%d]: %s'%(batch[i][0], result[i] if i < len(result) else None) for i in range(len(batch))]))
+            imgdb_ids = addimages(subthumbs, conn, subthumb_fmt, subthumb_fmtparam)
+            for i, r in enumerate(result):
+                assert type(r) is tuple
+                c.execute('UPDATE ocrresult SET %s, imgdb_id = ? WHERE id = ?' %
+                    ', '.join(['state = ?', 'ocrtext = ?', 'comment = ?'][:len(r)]),
+                    r + (imgdb_ids[i], batch[i][0]))
+                if r[0] == 'error':
+                    errcnt += 1
+                else:
+                    if r[1] == '':
+                        emptycnt += 1
+                    progress += 1
+            period_frames += len(result)
+            conn.commit()
+            thread_yield()
+    
+    cap.writelog(conn)
+    msg = ocr.done()
+    if msg:
+        log(msg, 'I', db=conn)
+    msg = 'OCR任务已完成(空项数%d)'%emptycnt if errcnt == 0 else 'OCR任务已完成(空项数%d)，但有%d个错误发生，请使用“继续OCR”功能来重试错误项'%(emptycnt,errcnt)
+    log(msg, 'S', db=conn)
+    conn.commit()
+    conn.close()
+    cap.close()
 
 ocr_thread = None
 def startocr():
@@ -522,45 +585,47 @@ def startocr():
 
 def make_thumbnail():
     cap = VideoReader()
-    with connect_db() as conn:
-        c = conn.cursor()
-        if getconfig(conn, 'thumb_h') != thumb_h:
-            putconfig(conn, 'thumb_h', thumb_h)
-            c.execute('DELETE FROM thumbnail')
-        start = c.execute('SELECT MAX(frame_id) + 1 FROM thumbnail').fetchone()[0]
-        start = 0 if start is None else start
-        if start < nframes - 1:
-            for part_start in range(start, nframes, thumb_npart):
-                parts = []
-                frame_ids = []
-                for i in range(part_start, min(part_start + thumb_npart, nframes)):
-                    img = cap.read(i)
-                    img = cv2.resize(img, (thumb_w, thumb_h), interpolation=cv2.INTER_AREA)
-                    parts.append(img)
-                    frame_ids.append(i)
-                imgdb_ids = addimages(parts, conn, thumb_fmt, thumb_fmtparam)
-                c.executemany('INSERT INTO thumbnail (frame_id, imgdb_id) VALUES (?, ?)', list(zip(frame_ids, imgdb_ids)))
-                if int(part_start / nframes * 100) != int((part_start - thumb_npart) / nframes * 100):
-                    log('生成缩略图: %d%%' % int(part_start / nframes * 100), db=conn)
-                    conn.commit()
-                thread_yield()
-            cap.writelog(conn)
-            log('生成缩略图已完成', 'I', db=conn)
-            conn.commit()
+    conn = connect_db()
+    c = conn.cursor()
+    if getconfig(conn, 'thumb_h') != thumb_h:
+        putconfig(conn, 'thumb_h', thumb_h)
+        c.execute('DELETE FROM thumbnail')
+    start = c.execute('SELECT MAX(frame_id) + 1 FROM thumbnail').fetchone()[0]
+    start = 0 if start is None else start
+    if start < nframes - 1:
+        for part_start in range(start, nframes, thumb_npart):
+            parts = []
+            frame_ids = []
+            for i in range(part_start, min(part_start + thumb_npart, nframes)):
+                img = cap.read(i)
+                img = cv2.resize(img, (thumb_w, thumb_h), interpolation=cv2.INTER_AREA)
+                parts.append(img)
+                frame_ids.append(i)
+            imgdb_ids = addimages(parts, conn, thumb_fmt, thumb_fmtparam)
+            c.executemany('INSERT INTO thumbnail (frame_id, imgdb_id) VALUES (?, ?)', list(zip(frame_ids, imgdb_ids)))
+            if int(part_start / nframes * 100) != int((part_start - thumb_npart) / nframes * 100):
+                log('生成缩略图: %d%%' % int(part_start / nframes * 100), db=conn)
+                conn.commit()
+            thread_yield()
+        cap.writelog(conn)
+        log('生成缩略图已完成', 'I', db=conn)
+        conn.commit()
+    conn.close()
     cap.close()
 
 def checkwaitocr(db):
     if db.cursor().execute("SELECT COUNT(id) FROM ocrresult WHERE state == 'waitocr'").fetchone()[0]:
         log('有未完成的OCR任务，可使用“继续OCR”功能继续上次的进度', 'W', db=db)
 def do_init():
-    with connect_db() as conn:
-        c = conn.cursor()
-        t = Thread(target=make_thumbnail)
-        t.start()
-        t.join()
-        log('后端已启动', 'S', db=conn)
-        checkwaitocr(db=conn)
-        conn.commit()
+    conn = connect_db()
+    c = conn.cursor()
+    t = Thread(target=make_thumbnail)
+    t.start()
+    t.join()
+    log('后端已启动', 'S', db=conn)
+    checkwaitocr(db=conn)
+    conn.commit()
+    conn.close()
 
 init_thread = Thread(target=do_init)
 init_thread.start()
@@ -662,7 +727,7 @@ def serve_state():
 @app.route('/exportass', methods=['POST'])
 @session_header_required
 def serve_exportass():
-    row = c.execute("SELECT frame_start, frame_end, ocrtext, top, bottom FROM ocrresult WHERE state = 'done' ORDER BY frame_start, frame_end").fetchall()
+    row = c.execute("SELECT frame_start, frame_end, ocrtext, top, bottom FROM ocrresult WHERE state = 'done' AND ocrtext != '' ORDER BY frame_start, frame_end").fetchall()
     if len(row) == 0:
         log('无字幕数据', 'I', db=conn)
         conn.commit()
@@ -679,17 +744,23 @@ def serve_exportass():
         m = sec100 // 100 // 60 % 60
         h = sec100 // 100 // 60 // 60
         return '%d:%02d:%02d.%02d'%(h,m,s,fs)
+    best_top = c.execute("SELECT top, COUNT(top) cnt FROM ocrresult WHERE state = 'done' AND ocrtext != '' AND bottom < ? GROUP BY top ORDER BY cnt DESC LIMIT 1", (height // 2,)).fetchone()
+    best_bottom = c.execute("SELECT bottom, COUNT(bottom) cnt FROM ocrresult WHERE state = 'done' AND ocrtext != '' AND bottom >= ? GROUP BY bottom ORDER BY cnt DESC LIMIT 1", (height // 2,)).fetchone()
+    best_height = c.execute("SELECT bottom+1-top, COUNT(bottom+1-top) cnt FROM ocrresult WHERE state = 'done' AND ocrtext != '' AND bottom >= ? GROUP BY bottom+1-top ORDER BY cnt DESC LIMIT 1", (height // 2,)).fetchone()
+    best_top = best_top[0] if best_top is not None else 10
+    best_bottom = best_bottom[0] if best_bottom is not None else 10
+    best_height = best_height[0] if best_height is not None else c.execute("SELECT bottom+1-top, COUNT(bottom+1-top) cnt FROM ocrresult WHERE state = 'done' AND ocrtext != '' GROUP BY bottom+1-top ORDER BY cnt DESC LIMIT 1", (height // 2,)).fetchone()[0]
     f = open(outfile, 'w', encoding='utf_8_sig', newline='\r\n')
     s = gconfig['ass_template']['header']
-    _, _, _, top, bottom = row[0]
     s = s.replace('{{文件名}}', os.path.basename(video))
     s = s.replace('{{视频宽度}}', str(width))
     s = s.replace('{{视频高度}}', str(height))
-    s = s.replace('{{字幕高度}}', str(bottom-top))
-    s = s.replace('{{底边距}}', str(round(height-bottom)))
+    s = s.replace('{{字幕高度}}', str(best_height))
+    s = s.replace('{{上半屏顶边距}}', str(best_top))
+    s = s.replace('{{下半屏底边距}}', str(height-best_bottom-1))
     f.write(s)
     for frame_start, frame_end, ocrtext, top, bottom in row:
-        s = gconfig['ass_template']['line']
+        s = gconfig['ass_template']['bottom_half' if bottom >= height // 2 else 'top_half']
         start_time = sec2str(frame2sec(frame_start, fps))
         end_time = sec2str(frame2sec(frame_end+1, fps))
         s = s.replace('{{开始时间}}', start_time)
@@ -859,7 +930,7 @@ def serve_startocr():
     ocrconf = getconfig(conn, 'OCR')
     ocrconf = json.loads(ocrconf) if ocrconf else {}
     ocrtop = ocrconf['top'] if 'top' in ocrconf else -1
-    ocrbottom = ocrconf['bottom']+1 if 'bottom' in ocrconf else -1
+    ocrbottom = ocrconf['bottom'] if 'bottom' in ocrconf else -1
     if ocrtop < 0 or ocrbottom < 0:
         log('请先指定字幕在屏幕上的范围', 'E', db=conn)
         conn.commit()
@@ -870,12 +941,13 @@ def serve_startocr():
         return ''
     checkpoint('执行“新OCR”之前')
     data = flask.request.get_json()
-    frame_start = data['ocr_start']
-    frame_end = data['ocr_end']
-    data = []
-    for frame_id in range(frame_start, frame_end):
-        data.append(('waitocr', frame_id, frame_id, ocrconf['engine'], ocrtop, ocrbottom))
-    c.executemany("INSERT INTO ocrresult (date, state, frame_start, frame_end, engine, top, bottom) VALUES (datetime('now','localtime'), ?, ?, ?, ?, ?, ?)", data)
+    frame_range = data['frame_range']
+    if frame_range is None:
+        frame_range = list(range(0, nframes))
+    c.execute('DELETE FROM jobrange')
+    for frame_id in sorted(frame_range):
+        c.execute("INSERT INTO ocrresult (date, state, frame_start, frame_end, engine, top, bottom) VALUES (datetime('now','localtime'), ?, ?, ?, ?, ?, ?)", ('waitocr', frame_id, frame_id, ocrconf['engine'], ocrtop, ocrbottom))
+        c.execute('INSERT INTO jobrange VALUES (?)', (c.lastrowid,))
     log('OCR任务已提交', db=conn)
     conn.commit()
     startocr()
@@ -906,48 +978,44 @@ def serve_continueocr():
         conn.commit()
         return ''
     data = flask.request.get_json()
-    c.execute('DROP TABLE IF EXISTS temp.ocrrange')
-    c.execute('CREATE TEMPORARY TABLE temp.ocrrange (id INTEGER PRIMARY KEY)')
-    c.executemany('INSERT INTO temp.ocrrange VALUES (?)', [(id,) for id in data['ocr_range']])
+    if data['item_range'] is not None:
+        c.execute('DELETE FROM jobrange')
+        c.executemany('INSERT INTO jobrange VALUES (?)', [(id,) for id in sorted(data['item_range'])])
     restarttype = data['restarttype']
     new_engine = json.loads(getconfig(conn, 'OCR'))['engine']
     if restarttype == '':
         errcnt = c.execute("""
-            SELECT COUNT(id) FROM ocrresult WHERE EXISTS (SELECT * FROM temp.ocrrange WHERE ocrresult.id = temp.ocrrange.id) AND
+            SELECT COUNT(id) FROM ocrresult WHERE EXISTS (SELECT * FROM jobrange WHERE ocrresult.id = jobrange.id) AND
                 (state = 'error' OR state = 'waitocr')""").fetchone()[0]
         if errcnt == 0:
             log('没有任务要做', db=conn)
-            c.execute('DROP TABLE IF EXISTS temp.ocrrange')
             conn.commit()
             return ''
         checkpoint('执行“继续OCR”之前')
-        c.execute("UPDATE ocrresult SET state = 'waitocr', engine = ? WHERE (state = 'waitocr' OR state = 'error') AND EXISTS (SELECT * FROM temp.ocrrange WHERE ocrresult.id = temp.ocrrange.id)", (new_engine,))
+        c.execute("UPDATE ocrresult SET state = 'waitocr', engine = ? WHERE (state = 'waitocr' OR state = 'error') AND EXISTS (SELECT * FROM jobrange WHERE ocrresult.id = jobrange.id)", (new_engine,))
     elif restarttype == 'all':
         donecnt = c.execute("""
-            SELECT COUNT(id) FROM ocrresult WHERE EXISTS (SELECT * FROM temp.ocrrange WHERE ocrresult.id = temp.ocrrange.id) AND
+            SELECT COUNT(id) FROM ocrresult WHERE EXISTS (SELECT * FROM jobrange WHERE ocrresult.id = jobrange.id) AND
                 (state = 'waitocr' OR state = 'error' OR state = 'waitocr' OR state = 'done')""").fetchone()[0]
         if donecnt == 0:
             log('没有任务要做', db=conn)
-            c.execute('DROP TABLE IF EXISTS temp.ocrrange')
             conn.commit()
             return ''
         checkpoint('执行“重新OCR”之前')
-        c.execute("UPDATE ocrresult SET state = 'waitocr', engine = ? WHERE (state = 'waitocr' OR state = 'error' OR state = 'waitocr' OR state = 'done') AND EXISTS (SELECT * FROM temp.ocrrange WHERE ocrresult.id = temp.ocrrange.id)", (new_engine,))
+        c.execute("UPDATE ocrresult SET state = 'waitocr', engine = ? WHERE (state = 'waitocr' OR state = 'error' OR state = 'waitocr' OR state = 'done') AND EXISTS (SELECT * FROM jobrange WHERE ocrresult.id = jobrange.id)", (new_engine,))
     elif restarttype == 'empty':
         emptycnt = c.execute("""
-            SELECT COUNT(id) FROM ocrresult WHERE EXISTS (SELECT * FROM temp.ocrrange WHERE ocrresult.id = temp.ocrrange.id) AND
+            SELECT COUNT(id) FROM ocrresult WHERE EXISTS (SELECT * FROM jobrange WHERE ocrresult.id = jobrange.id) AND
                 (state = 'done' AND ocrtext = '')""").fetchone()[0]
         if emptycnt == 0:
             log('没有任务要做', db=conn)
-            c.execute('DROP TABLE IF EXISTS temp.ocrrange')
             conn.commit()
             return ''
         checkpoint('执行“空项OCR”之前')
-        c.execute("UPDATE ocrresult SET state = 'waitocr', engine = ? WHERE (state = 'done' AND ocrtext = '') AND EXISTS (SELECT * FROM temp.ocrrange WHERE ocrresult.id = temp.ocrrange.id)", (new_engine,))
+        c.execute("UPDATE ocrresult SET state = 'waitocr', engine = ? WHERE (state = 'done' AND ocrtext = '') AND EXISTS (SELECT * FROM jobrange WHERE ocrresult.id = jobrange.id)", (new_engine,))
     else:
         assert False
     log('OCR任务已提交', db=conn)
-    c.execute('DROP TABLE IF EXISTS temp.ocrrange')
     conn.commit()
     startocr()
     return 'ok'
@@ -963,4 +1031,4 @@ def add_header(response):
     response.close_connection = True
     return response
 
-app.run(threaded=False, port=gconfig['port'])
+app.run(threaded=False, host=host, port=port)

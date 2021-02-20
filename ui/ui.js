@@ -1,7 +1,16 @@
 "use strict";
 
-let app = null;
-let geval = eval;
+// use 'var' instead of 'let' for global variables
+// or compile_expr() can't capture them!!!
+
+var geval = eval;
+function compile_expr(gvars, param, expr) {
+  /* NOT SAFE BUT EFFECTIVE */
+  return geval('(function(){"use strict";let ' + Object.keys(window).filter(i => gvars.indexOf(i) < 0).join(';let ') + ';return function('+param.join(',')+'){return ('+expr+');};})()');
+}
+function compile_func(gvars, func) {
+  return compile_expr(gvars, [], '('+func+')')();
+}
 
 function strcmp(a, b) {
   if (a < b) return -1;
@@ -37,7 +46,7 @@ function array_cmp(a, b) {
 }
 
 ///////////////////////////////////////////////////////////////////////////////
-let curedit = null;
+var curedit = null;
 function savecur() {
   if (curedit) {
     let upd_item = id2item.get(curedit[colmap['id']]);
@@ -76,7 +85,7 @@ function tbledit(item, scrolltype) {
       app.$refs.editbox.value = newedit[colmap['ocrtext']];
       app.$refs.editbox.focus();
       app.$refs.editbox.setSelectionRange(0, 0);
-      app.setocrsel(1, [newedit[colmap['top']], newedit[colmap['bottom']]-1]);
+      app.setocrsel(1, [newedit[colmap['top']], newedit[colmap['bottom']]]);
     }
   } else {
     if (curedit) {
@@ -105,26 +114,38 @@ function updatetbledit() {
 
 ///////////////////////////////////////////////////////////////////////////////
 
+var coldesc = [
+  ['id', '字幕唯一内部ID'],
+  ['state', '字幕状态：waitocr, error, done, merged'],
+  ['frame_start', '字幕起始帧(含)'],
+  ['frame_end', '字幕结束帧(含)'],
+  ['engine', '使用的OCR引擎名'],
+  ['top', '字幕区域Y1(含)'],
+  ['bottom', '字幕区域Y2(含)'],
+  ['ocrtext', '字幕文本'],
+];
 
-let lastresult = '';
-let ocrresult = {col:[],row:[]};
-let colmap = {};
-let id2item = new Map(); // id => { ele: <tr>, sortkey: [], r: [c1, c2...] }
+var lastresult = '';
+var ocrresult = {col:[],row:[]};
+var colmap = {};
+var id2item = new Map(); // id => { ele: <tr>, sortkey: [], r: [c1, c2...] }
 
-let tableele = null;
-let tblview = new Set();
-let tblitem = [];
-let viewopt = {
+var tableele = null;
+var tblview = new Set();
+var tblitem = [];
+var viewopt = {
   filter: null,
   sortkey: null,
 };
-let tblsortfunc = [
+var tblsortfunc = [
   ['按帧范围','[frame_start,frame_end,top,bottom,engine,id]'],
   ['按帧OCR区域','[top,bottom,frame_start,frame_end,engine,id]'],
   ['按引擎名称','[engine,frame_start,frame_end,top,bottom,id]'],
 ];
-let tblfltfunc = [
+var tblfltfunc = [
   ['全部','true'],
+  ['上半屏',''/* updated in app.mounted() */],
+  ['下半屏',''/* updated in app.mounted() */],
   ['所有非空',"state == 'done' && ocrtext != ''"],
   ['待清理',"state == 'merged' || (state == 'done' && ocrtext == '')"],
   ['等待OCR',"state == 'waitocr'"],
@@ -135,7 +156,7 @@ function setviewopt(filter, sortkey) {
     let fn = null;
     app.tblflterr = false;
     try {
-      fn = new Function(...ocrresult.col, 'return '+filter);
+      fn = compile_expr([], ocrresult.col, filter);
     } catch(e) {
       app.tblflterr = true;
     }
@@ -149,7 +170,7 @@ function setviewopt(filter, sortkey) {
     };
   }
   if (sortkey !== null) {
-    let fn = new Function(...ocrresult.col, 'return '+sortkey);
+    let fn = compile_expr([], ocrresult.col, sortkey);
     viewopt.sortkey = function (item) {
       return fn.apply(this, item.r);
     };
@@ -171,9 +192,9 @@ function sortedview() {
   });
 }
 
-let tblselect = new Set();
-let tblselect0 = new Set();
-let tbllastsel = null;
+var tblselect = new Set();
+var tblselect0 = new Set();
+var tbllastsel = null;
 
 function tbllock(item) {
   if (item) {
@@ -320,7 +341,7 @@ function updateelement(item, lastele, rebuildtable) {
   item.ele.dataset.state = row.state;
   item.ele.dataset.empty = row.ocrtext == '' ? 'empty' : '';
   item.ele.children[0].innerText = row.frame_start + '-' + row.frame_end;
-  item.ele.children[1].innerText = row.top + '-' + (row.bottom-1);
+  item.ele.children[1].innerText = row.top + '-' + row.bottom;
   item.ele.children[2].innerText = row.engine;
   item.ele.children[3].textContent = row.state == 'done' ? (row.ocrtext == '' ? '(空)' : row.ocrtext) :
     row.state == 'waitocr' ? '等待OCR' :
@@ -404,6 +425,7 @@ function updateview(needdelete, needupdate) {
     tblitem.forEach((item) => tableele.tBodies[0].appendChild(item.ele));
   }
 
+  app.redrawtimebar();
   updateselect();
 }
 function updateresult(jsonstr) {
@@ -496,6 +518,7 @@ Vue.component('imgdb', {
   },
 })
 
+var app;
 app = new Vue({
   el: '#app',
   data: {
@@ -516,6 +539,8 @@ app = new Vue({
     pixeldata: null,
 
     editorfontsize: 20,
+    adveditor: 0,
+    adveditcm: null,
 
     tblsortfunc: tblsortfunc,
     tblsort: tblsortfunc[0][1],
@@ -547,14 +572,8 @@ app = new Vue({
     scripttemplate: `// 自定义脚本
 function (items) {
   for (let item of items) {
-    // item.id             字幕唯一内部ID
-    // item.state          字幕状态：waitocr, error, done, merged
-    // item.frame_start    字幕起始帧
-    // item.frame_end      字幕结束帧(含)
-    // item.engine         使用的OCR引擎名
-    // item.top            字幕区域Y1
-    // item.bottom         字幕区域Y2(不含)
-    // item.ocrtext        字幕文本
+` + coldesc.map((d) => '    // item.' + d[0] + ' '.repeat(15 - d[0].length) + d[1]).join('\n') +
+`
   }
   //return '处理完毕';
 }
@@ -696,6 +715,8 @@ function (items) {
     this.myscript.scripts = this.defaultscripts.concat(this.myscript.scripts.filter((s)=>!s.locked));
     this.scriptsel = this.myscript.scripts.slice(-1)[0];
     this.pos = 0;
+    this.tblfltfunc.find((f) => f[0] == '上半屏')[1] = 'bottom < ' + Math.floor(this.info.height / 2);
+    this.tblfltfunc.find((f) => f[0] == '下半屏')[1] = 'bottom >= ' + Math.floor(this.info.height / 2);
     tbledit(null);
     window.onmouseup = (e) => this.appmouseup(e);
     window.onmousemove = (e) => this.appmousemove(e);
@@ -704,6 +725,11 @@ function (items) {
       value: '',
       mode: 'javascript',
       lineNumbers: true,
+      tabSize: 2,
+    });
+    this.adveditcm = CodeMirror(this.$refs.adveditbox, {
+      value: '',
+      mode: 'javascript',
       tabSize: 2,
     });
     this.codeedit.on('change', () => this.savescript());
@@ -784,7 +810,7 @@ function (items) {
       }
     },
     inputocrsel() {
-      this.showmyprompt((this.ocrselmode?'修改选中的'+tblselect.size+'条字幕的OCR区域':'修改新项目的OCR区域') + '\n请输入OCR区域信息，格式为“Y1-Y2”', this.ocrsel[0]+'-'+this.ocrsel[1], (val) => {
+      this.showmyprompt((this.ocrselmode?'修改选中的'+tblselect.size+'条字幕的OCR区域':'修改新项目的OCR区域') + '\n请输入OCR区域信息，格式为“Y1-Y2”', (this.ocrsel[0]>=0 ? this.ocrsel[0]+'-'+this.ocrsel[1] : ''), (val) => {
         if (val !== null) {
           let newsel = val.split('-').map((v) => parseInt(v, 10));
           if (newsel.length == 2 && newsel[0] >= 0 && newsel[1] >= 0) {
@@ -807,7 +833,7 @@ function (items) {
       } else if (this.ocrselmode == 1) {
         let selrange = tblitem.filter((item) => tblselect.has(item));
         let changes = selrange.map((item) => ziprow(ocrresult.col, item.r));
-        let top = this.ocrsel[0], bottom = this.ocrsel[1]+1;
+        let top = this.ocrsel[0], bottom = this.ocrsel[1];
         changes.forEach((item) => (item.top = top, item.bottom = bottom));
         if (curedit) {
           curedit[colmap['top']] = top;
@@ -952,6 +978,51 @@ function (items) {
       }
     },
 
+    advedit() {
+      if (curedit) {
+        this.adveditor = 1;
+        let lines = [];
+        for (let pair of coldesc) {
+          if (pair[0] == 'id') continue;
+          lines.push('')
+          lines.push('  // ' + pair[1])
+          lines.push('  "' + pair[0] + '": ' + JSON.stringify(curedit[colmap[pair[0]]]) + ',');
+        }
+        this.$nextTick(function() {
+          this.adveditcm.refresh();
+        });
+        this.adveditcm.getDoc().setValue('{' + lines.join('\n') + '\n}\n');
+        this.adveditcm.scrollTo(0, 0);
+      }
+    },
+    adveditok() {
+      let changes;
+      try {
+        changes = compile_expr([], [], this.adveditcm.getDoc().getValue())();
+      } catch (e) {
+        alert('错误: ('+e.lineNumber+'行 '+ e.columnNumber+'列)\n'+e);
+        return;
+      }
+
+      let item = id2item.get(curedit[colmap['id']]);
+      let newitem = ziprow(ocrresult.col, item.r);
+      for (let [key, value] of Object.entries(changes)) {
+        if (key == 'id') continue;
+        newitem[key] = value;
+      }
+      this.refreshafter(axios.post('/updateresult', {
+        changes: [newitem],
+        checkpoint: '“高级修改：'+JSON.stringify(changes)+'”之前',
+        message: '已保存高级修改：'+JSON.stringify(changes),
+        compatlog: true,
+      }));
+      tbllock(item);
+      this.adveditor = 0;
+    },
+    adveditcancel() {
+      this.adveditor = 0;
+    },
+
 
     barpos(e) {
       return Math.max(0, Math.min(this.info.nframes - 1,
@@ -1029,17 +1100,21 @@ function (items) {
 
       let state_color = [
         null,
-        [176,94,0], // 1: waitocr
-        [84, 168, 0],  // 2: done (ocrtext != '')
-        [255,0,0],  // 3: error
+        [255,255,255], // 1: not in view
+        [176,94,0], // 2: waitocr
+        [84,168,0],  // 3: done (ocrtext != '')
+        [255,0,0],  // 4: error
       ];
       let f = w / this.info.nframes;
-      tblitem.forEach((item) => {
+      id2item.forEach((item) => {
         let p = 0;
         switch (item.r[colmap['state']]) {
-          case 'waitocr': p = 1; break;
-          case 'done': p = item.r[colmap['ocrtext']] != '' ? 2 : 0; break;
-          case 'error': p = 3; break;
+          case 'waitocr': p = 2; break;
+          case 'done': p = item.r[colmap['ocrtext']] != '' ? 3 : 0; break;
+          case 'error': p = 4; break;
+        }
+        if (p > 0 && !tblview.has(item)) {
+          p = 1;
         }
         if (p > 0) {
           for (let i = item.r[colmap['frame_start']]; i <= item.r[colmap['frame_end']]; i++) {
@@ -1061,9 +1136,9 @@ function (items) {
     },
 
     tblselall() {
-      this.tblflt = this.tblfltfunc[0][1];
+      /*this.tblflt = this.tblfltfunc[0][1];
       this.tblsort = this.tblsortfunc[0][1];
-      setviewopt(this.tblflt, this.tblsort);
+      setviewopt(this.tblflt, this.tblsort);*/
       tblselall();
     },
     tblselnone() { tblselnone(); },
@@ -1165,7 +1240,7 @@ function (items) {
       let f;
       let message;
       try {
-        f = geval('('+s.value+')');
+        f = compile_func(['alert', 'confirm'], s.value);
       } catch(e) {
         alert('语法错误: ('+e.lineNumber+'行 '+ e.columnNumber+'列)\n'+e);
         return false;
@@ -1195,7 +1270,7 @@ function (items) {
     startocr() {
       if (ocrresult.row.length == 0) {
         this.setwaitstatus();
-        this.refreshafter(axios.post('/startocr', { ocr_start: 0, ocr_end: this.info.nframes }));
+        this.refreshafter(axios.post('/startocr', { frame_range: Array.from(Array(this.info.nframes).keys()) }));
         return;
       }
       this.showmyprompt('请输入OCR帧范围，格式为“起-终”', 0+'-'+(this.info.nframes-1), (val) => {
@@ -1203,9 +1278,13 @@ function (items) {
           let timesel = val.split('-').map((v) => parseInt(v, 10));
           if (timesel.length == 2 && timesel[0] >= 0 && timesel[1] >= 0) {
             timesel.sort((a, b) => a - b);
-            if (timesel[0] >= 0 && timesel[1] <= (this.info.nframes-1)) {
+            if (timesel[0] >= 0 && timesel[1] < this.info.nframes) {
               this.setwaitstatus();
-              this.refreshafter(axios.post('/startocr', { ocr_start: timesel[0], ocr_end: timesel[1]+1 }));
+              let frame_range = [];
+              for (let i = timesel[0]; i <= timesel[1]; i++) {
+                frame_range.push(i);
+              }
+              this.refreshafter(axios.post('/startocr', { frame_range: frame_range }));
               return;
             }
           }
@@ -1214,8 +1293,8 @@ function (items) {
       });
     },
     continueocr(restarttype) {
-      let ocr_range = Array.from(tblselect).map((item) => item.r[colmap['id']]);
-      if (ocr_range.length == 0) {
+      let item_range = Array.from(tblselect).map((item) => item.r[colmap['id']]);
+      if (item_range.length == 0) {
         alert('请先选中要处理的字幕');
         return;
       }
@@ -1224,7 +1303,7 @@ function (items) {
           return;
         }
       }
-      this.refreshafter(axios.post('/continueocr', { ocr_range: ocr_range, restarttype: restarttype }));
+      this.refreshafter(axios.post('/continueocr', { item_range: item_range, restarttype: restarttype }));
     },
     async stopocr() {
       this.setwaitstatus();
@@ -1319,7 +1398,6 @@ function (items) {
         if (!this.rerefresh) {
           if (updateresult(newresultdata)) {
             this.scrollstatus();
-            this.redrawtimebar();
           }
         }
 

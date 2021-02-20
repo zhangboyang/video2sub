@@ -1,5 +1,6 @@
 #!/usr/bin/env python3
 import ast
+from os.path import basename
 import sys
 import os
 import subprocess
@@ -8,6 +9,9 @@ import urllib.request
 import time
 import traceback
 import sqlite3
+import secrets
+import socket
+from datetime import datetime
 if os.name == 'nt':
     import win32gui
     import win32con
@@ -31,13 +35,42 @@ EXTENSIONS_VIDEO = "*.3g2;*.3gp;*.3gp2;*.3gpp;*.amv;*.asf;*.avi;*.bik;*.bin;*.cr
     "*.ogg;*.ogm;*.ogv;*.ogx;*.ps;" \
     "*.rec;*.rm;*.rmvb;*.rpl;*.thp;*.tod;*.tp;*.ts;*.tts;*.txd;*.vob;*.vro;*.webm;*.wm;*.wmv;*.wtv;*.xesc"
 
+class BackendDiedError(Exception):
+    pass
+
+fail = False
+
 gconfig = ast.literal_eval(open('config.txt', 'r', encoding='utf_8_sig').read())
-url = 'http://127.0.0.1:%d' % gconfig['port']
+url = None
 backend = None
 frontend = None
 session = None
 lastwatch = None
 video = None
+backendlog = None
+backendlog_file = 'backendlog_%s_%d.txt' % (datetime.now().strftime('%Y%m%d_%H%M%S'), os.getpid())
+
+def drop_backendlog():
+    global backendlog
+    if backendlog is not None:
+        backendlog.close()
+        backendlog = None
+        if os.path.exists(backendlog_file):
+            os.remove(backendlog_file)
+
+def alloc_hostport():
+    host = gconfig['host']
+    port_range = list(range(*gconfig['port']))
+    while len(port_range) > 0:
+        port = secrets.choice(port_range)
+        port_range = [p for p in port_range if p != port]
+        with socket.socket(socket.AF_INET, socket.SOCK_STREAM) as s:
+            try:
+                s.bind((host, port))
+                return (host, port)
+            except:
+                pass
+    raise Exception('无可用后端通信端口')
 
 def exe(path):
     if windows:
@@ -56,11 +89,18 @@ def exe(path):
 
 def run_backend(file, silent=False, nosession=False):
     global backend
+    global url
     global video
     global session
     global lastwatch
+    global backendlog
+    hostport = alloc_hostport()
     video = os.path.basename(file)
-    backend = subprocess.Popen(exe('video2sub.py') + [file], stdout=subprocess.DEVNULL if silent else None, stderr=subprocess.DEVNULL if silent else None)
+    drop_backendlog()
+    if silent:
+        backendlog = open(backendlog_file, 'wb')
+    backend = subprocess.Popen(exe('video2sub.py') + [hostport[0], str(hostport[1]), file], stdout=backendlog if silent else None, stderr=subprocess.STDOUT if silent else None)
+    url = 'http://%s:%d' % hostport
     session = None
     lastwatch = None
     if api('/getpid') != backend.pid:
@@ -70,7 +110,7 @@ def run_backend(file, silent=False, nosession=False):
 
 def check_backend():
     if backend.poll() is not None:
-        raise Exception('backend died')
+        raise BackendDiedError()
 
 def run_frontend():
     global frontend
@@ -152,10 +192,10 @@ try:
         print('若指定多个视频文件，则使用批处理模式')
     elif len(files) == 1:
         print('图形界面模式')
+        print('=====')
         run_backend(files[0], nosession=True)
         run_frontend()
         frontend.wait()
-        backend.kill()
     elif len(files) > 1:
         start_time = time.time()
         print('批处理模式')
@@ -164,6 +204,7 @@ try:
         run_backend(files[0], silent=True)
         ocrconfig = api('/loadconfig', {'key':'OCR'})
         backend.kill()
+        backend.wait()
         print('将要使用的OCR设置:', ocrconfig)
         success = 0
         for file in files:
@@ -187,10 +228,10 @@ try:
                     api('/saveconfig', {'key':'OCR', 'value':ocrconfig, 'msg':'设定批处理OCR设置: '+str(ocrconfig)})
                     if state['nresult'] == 0:
                         print('数据库中无任何OCR记录, 执行“新OCR”操作')
-                        ret = api('/startocr', {'ocr_start':0, 'ocr_end':info['nframes']})
+                        ret = api('/startocr', {'ocr_range': None})
                     else:
                         print('数据库中有待处理的项目，执行“继续OCR”操作')
-                        ret = api('/continueocr', {'ocr_start':0, 'ocr_end':info['nframes'], 'restarttype':''})
+                        ret = api('/continueocr', {'ocr_range': None, 'restarttype': ''})
                     if ret == b'ok':
                         while api('/state')['ocrjob']:
                             watch()
@@ -205,12 +246,48 @@ try:
                     success += 1
                     break
             backend.kill()
+            backend.wait()
             print('耗时%.2f秒'%(time.time() - file_start_time))
         print('共%d个文件，成功%d个，耗时%.2f秒'%(len(files),success,time.time()-start_time))
+except KeyboardInterrupt:
+    print('用户手动中断')
+except Exception as e:
+    if isinstance(e, BackendDiedError):
+        print('（后端异常退出）')
+    else:
+        print('===== 异常 =====')
+        traceback.print_exc()
+    if backendlog is not None:
+        backendlog.close()
+        with open(backendlog_file, 'r', errors='replace') as f:
+            lines = f.readlines()
+            maxshow = 50
+            if len(lines) > maxshow:
+                print('===== 只显示了后端日志 (%s) 的最后 %d 行 =====' % (backendlog_file, maxshow))
+                lines = lines[-maxshow:]
+            else:
+                print('===== 后端日志 =====')
+            print(''.join(lines), end='')
+    fail = True
 except:
     traceback.print_exc()
+    fail = True
 
 if backend:
     backend.kill()
+    backend.wait()
 if frontend:
     frontend.kill()
+    frontend.wait()
+
+if fail:
+    print('=====')
+    if windows:
+        print('遇到致命错误，按回车退出程序')
+        input()
+    else:
+        print('遇到致命错误')
+    sys.exit(1)
+else:
+    drop_backendlog()
+    sys.exit(0)

@@ -182,7 +182,7 @@ div.toolbox > div.text {
   float: left;
 }
 #ocrinfo {
-  max-width: 120px;
+  max-width: 140px;
 }
 
 #editor {
@@ -582,5 +582,41 @@ table tr:last-child td {
   text-align: right;
 }
 #promptdialog > div:nth-child(3) > a.button {
+  padding: 10px 20px;
+}
+
+#adveditorbg {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  z-index: 20;
+}
+#adveditor {
+  border: 1px solid black;
+  background-color: white;
+  width: 600px;
+  height: 550px;
+  position: absolute;
+  margin: auto;
+  z-index: 20;
+  display: flex;
+  flex-direction: column;
+  user-select: none;
+  padding: 10px;
+}
+#adveditor > div:nth-child(1) {
+  flex: 1;
+  margin-bottom: 10px;
+  overflow: hidden;
+  border: 1px solid gray;
+}
+#adveditor > div:nth-child(1) > .CodeMirror {
+  height: 100%;
+  width: 100%;
+}
+#adveditor > div:nth-child(2) {
+  text-align: right;
+}
+#adveditor > div:nth-child(2) > a.button {
   padding: 10px 20px;
 }
