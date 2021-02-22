@@ -62,7 +62,7 @@
             </div>
           </div>
           <div id="editor">
-            <div>
+            <div :style="{'min-width': 'calc(' + info.thumb_w + 'px + 5px)'}">
               <div>
                 <a class="button" @click.prevent="editorfontsize=Math.min(editorfontsize+1,50)">显示＋<div class="bl">让右侧文本框文字变大</div></a>
                 <a class="button" @click.prevent="editorfontsize=Math.max(editorfontsize-1,16)">显示－<div class="bl">让右侧文本框文字变小</div></a>
@@ -70,12 +70,13 @@
                 <a class="button" @click.prevent="jumppos(1)">结束帧<div class="bl">显示本条字幕的最后一帧</div></a>
               </div>
             </div>
-            <input type="text" ref="editbox" @keydown="editorkeydown" :style="{ width: Math.round(info.width*Math.max(framescale, 360/info.height))+'px', 'font-size': editorfontsize+'px' }" spellcheck="false">
+            <input type="text" ref="editbox" @keydown="editorkeydown" @copy="editboxcopy" @cut="editboxcut" @paste="editboxpaste" :style="{ width: Math.round(info.width*Math.max(framescale, 360/info.height))+'px', 'min-width': Math.round(info.width*Math.max(framescale, 360/info.height))+'px', 'font-size': editorfontsize+'px' }" spellcheck="false">
             <div>
               <div>
                 <a class="button" @click.prevent="jumpprev">上<div class="bl">跳转到上一条字幕<br>快捷键：<br>&nbsp;方向键上<br>&nbsp;或鼠标滚轮上</div></a>
-                <a class="button" @click.prevent="jumpnext">下<div class="br">跳转到下一条字幕<br>快捷键：<br>&nbsp;方向键下<br>&nbsp;或Enter<br>&nbsp;或鼠标滚轮下</div></a>
-                <a class="button" @click.prevent="mergeprev">与上条合并<div class="br">丢弃当前文本，将本条合并到上一条<br>并跳转到下一条字幕<br>快捷键：Ctrl+Enter</div></a>
+                <a class="button" @click.prevent="jumpnext">下<div class="bl">跳转到下一条字幕<br>快捷键：<br>&nbsp;方向键下<br>&nbsp;或Enter<br>&nbsp;或鼠标滚轮下</div></a>
+                <a class="button" @click.prevent="mergeprev">合并上条<div class="br">丢弃当前文本，将本条合并到上一条<br>并跳转到下一条字幕<br>快捷键：Ctrl+Enter</div></a>
+                <a class="button" @click.prevent="replaceprev">替换上条<div class="br">使用当前文本，将本条合并到上一条<br>并跳转到下一条字幕<br>快捷键：Ctrl+Shift+Enter</div></a>
                 <a class="button" @click.prevent="advedit">高级编辑<div class="br">直接编辑当前字幕的内部数据</div></a>
               </div>
             </div>
@@ -105,7 +106,7 @@
                 <option v-for="i in tblfltfunc" :value="i[1]">{{i[0]}}</option>
               </select>
             </div>
-            <input id="tblfltcustom" type="text" v-model="tblflt" :style="{'background-color':tblflterr?'lightpink':'azure'}" title="自定义JavaScript表达式，具体参数详见“执行自定义脚本”功能" spellcheck="false">
+            <input id="tblfltcustom" type="text" v-model="tblfltedit" @keydown="tblfltkeydown" :style="{'background-color': tblfltedit==tblflt ? (tblflterr ? 'lightpink':'azure') : 'lemonchiffon'}" title="自定义JavaScript表达式，按回车应用，具体参数详见“高级编辑”或“执行自定义脚本”功能" spellcheck="false">
           </div>
           <div id="text">
             <table id="ocrresult" @click="tblselnone">

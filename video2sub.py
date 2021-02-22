@@ -319,7 +319,7 @@ class ImageVConcat:
             for i in range(h0, h0 + self.h):
                 print(h0, self.hdict[i])
                 s.update(self.hdict[i])
-            ocrtext = '\\N'.join([ocrtext for top, bottom, left, right, ocrtext, comment in sorted(s)])
+            ocrtext = '\n'.join([ocrtext for top, bottom, left, right, ocrtext, comment in sorted(s)])
             comment = '#'.join([comment for top, bottom, left, right, ocrtext, comment in sorted(s)])
             result.append(('done', ocrtext, comment))
         return result
@@ -404,7 +404,7 @@ class BaiduOcr:
                         vcat.addresult(left, top, right, bottom, words_result["words"], str(words_result))
                     results = vcat.getresult()
                 else:
-                    results.append(('done', '\\N'.join([words_result["words"] for words_result in result_json["words_result"]]), str(result_json)))
+                    results.append(('done', '\n'.join([words_result["words"] for words_result in result_json["words_result"]]), str(result_json)))
             except Exception:
                 traceback.print_exc()
                 if self.use_batch:
@@ -438,7 +438,7 @@ class ChineseOcr:
                 data = b'{"imgString":"data:%s;base64,%s","textAngle":false,"textLine":%s}' % (mime[format].encode(), base64.b64encode(blob.tobytes()), self.textLine)
                 req = urllib.request.urlopen(gconfig['chineseocr']['url'], data, timeout=5)
                 rsp = json.load(req)
-                result = ('done', '\\N'.join([item['text'] for item in rsp['res']]))
+                result = ('done', '\n'.join([item['text'] for item in rsp['res']]))
             except Exception:
                 traceback.print_exc()
                 result = ('error', None)
@@ -712,13 +712,13 @@ def serve_logs():
 @session_header_required
 def serve_state():
     loaded = not init_thread.is_alive()
-    ocrjob = ocr_thread is not None and ocr_thread.is_alive()
+    ocractive = ocr_thread is not None and ocr_thread.is_alive()
     nresult = c.execute('SELECT COUNT(id) FROM ocrresult').fetchone()[0]
     nwaitocr = c.execute("SELECT COUNT(id) FROM ocrresult WHERE state = 'waitocr'").fetchone()[0]
     nerror = c.execute("SELECT COUNT(id) FROM ocrresult WHERE state = 'error'").fetchone()[0]
     return flask.jsonify({
         'loaded': loaded,
-        'ocrjob': ocrjob,
+        'ocractive': ocractive,
         'nresult': nresult,
         'nwaitocr': nwaitocr,
         'nerror': nerror,
@@ -765,7 +765,7 @@ def serve_exportass():
         end_time = sec2str(frame2sec(frame_end+1, fps))
         s = s.replace('{{开始时间}}', start_time)
         s = s.replace('{{结束时间}}', end_time)
-        s = s.replace('{{字幕文本}}', ocrtext)
+        s = s.replace('{{字幕文本}}', ocrtext.replace('\n', '\\N'))
         f.write(s)
     f.close()
     log('已导出至：%s'%outfile, 'S', db=conn)
@@ -796,37 +796,42 @@ def serve_exportcsv():
 @app.route('/importcsv', methods=['POST'])
 @session_header_required
 def serve_importcsv():
-    csvfile = flask.request.files['csv']
-    r = csv.reader(io.TextIOWrapper(csvfile, encoding='utf_8_sig'))
-    col = next(r)
-    colmap = dict([(c, i) for i, c in enumerate(col)])
-    coltype = dict(c.execute("SELECT name,type FROM pragma_table_info('ocrresult')").fetchall())
-    def convertvalue(v, c):
-        if v == 'SQLITE_NULL':
-            return None
-        if coltype[c].startswith('INT'):
-            return int(v)
-        return v
-    ins = []
-    upd = []
-    asnew = int(flask.request.form['asnew'])
-    for row in r:
-        id = row[colmap['id']]
-        if id == '':
-            continue
-        if int(id) == 0 or asnew:
-            ins.append(tuple([convertvalue(v, c) for v, c in zip(row, col) if c != 'id']))
-        else:
-            upd.append(tuple([convertvalue(v, c) for v, c in zip(row, col) if c != 'id'] + [int(id)]))
+    try:
+        with conn:
+            csvfile = flask.request.files['csv']
+            r = csv.reader(io.TextIOWrapper(csvfile, encoding='utf_8_sig'))
+            col = next(r)
+            colmap = dict([(c, i) for i, c in enumerate(col)])
+            coltype = dict(c.execute("SELECT name,type FROM pragma_table_info('ocrresult')").fetchall())
+            def convertvalue(v, c):
+                if v == 'SQLITE_NULL':
+                    return None
+                if coltype[c].startswith('INT'):
+                    return int(v)
+                return v
+            ins = []
+            upd = []
+            asnew = int(flask.request.form['asnew'])
+            for row in r:
+                id = row[colmap['id']]
+                if id == '':
+                    continue
+                if int(id) == 0 or asnew:
+                    ins.append(tuple([convertvalue(v, c) for v, c in zip(row, col) if c != 'id']))
+                else:
+                    upd.append(tuple([convertvalue(v, c) for v, c in zip(row, col) if c != 'id'] + [int(id)]))
 
-    checkpoint(flask.request.form['checkpoint'])
-    # FIXME: sql inject
-    c.executemany('UPDATE ocrresult SET ' + ','.join([c + ' = ?' for c in col if c != 'id']) + ' WHERE id = ?', upd)
-    updcnt = c.rowcount
-    c.executemany('INSERT INTO ocrresult (' + ','.join([c for c in col if c != 'id']) + ') VALUES (' + ','.join(['?' for c in col if c != 'id']) + ')', ins)
-    inscnt = c.rowcount
-    log('导入CSV文件成功，修改了%d条字幕，新增了%d条字幕'%(updcnt,inscnt), 'S', db=conn)
-    conn.commit()
+            checkpoint(flask.request.form['checkpoint'])
+            # FIXME: sql inject
+            c.executemany('UPDATE ocrresult SET ' + ','.join([c + ' = ?' for c in col if c != 'id']) + ' WHERE id = ?', upd)
+            updcnt = c.rowcount
+            c.executemany('INSERT INTO ocrresult (' + ','.join([c for c in col if c != 'id']) + ') VALUES (' + ','.join(['?' for c in col if c != 'id']) + ')', ins)
+            inscnt = c.rowcount
+            log('导入CSV文件成功，修改了%d条字幕，新增了%d条字幕'%(updcnt,inscnt), 'S', db=conn)
+    except Exception:
+        traceback.print_exc()
+        log('导入CSV文件失败，请查看控制台中的错误详细信息', 'E', db=conn)
+        conn.commit()
     return ''
 
 @app.route('/checkpoint', methods=['POST'])
@@ -896,8 +901,12 @@ def serve_updateresult():
     upd = []
     ins = []
     for item in data['changes']:
-        if item['id'] > 0:
-            upd.append(tuple([item[col] for col in cols] + [item['id']]))
+        if 'id' in item and item['id'] > 0:
+            if all(col in item for col in cols):
+                upd.append(tuple([item[col] for col in cols] + [item['id']]))
+            else:
+                curcols = [col for col in cols if col in item]
+                c.execute('UPDATE ocrresult SET ' + ','.join([c + ' = ?' for c in curcols]) + ' WHERE id = ?', tuple(item[c] for c in curcols) + (item['id'],))
         else:
             ins.append(tuple([item[col] for col in cols]))
     c.executemany('UPDATE ocrresult SET ' + ','.join([c + ' = ?' for c in cols]) + ' WHERE id = ?', upd)
@@ -981,6 +990,8 @@ def serve_continueocr():
     if data['item_range'] is not None:
         c.execute('DELETE FROM jobrange')
         c.executemany('INSERT INTO jobrange VALUES (?)', [(id,) for id in sorted(data['item_range'])])
+    else:
+        c.execute("INSERT OR IGNORE INTO jobrange SELECT id FROM ocrresult WHERE (state = 'waitocr' OR state = 'error')")
     restarttype = data['restarttype']
     new_engine = json.loads(getconfig(conn, 'OCR'))['engine']
     if restarttype == '':

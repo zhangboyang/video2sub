@@ -11,7 +11,6 @@ function compile_expr(gvars, param, expr) {
 function compile_func(gvars, func) {
   return compile_expr(gvars, [], '('+func+')')();
 }
-
 function strcmp(a, b) {
   if (a < b) return -1;
   if (a > b) return 1;
@@ -21,6 +20,13 @@ function ziprow(col, arr) {
   let obj = {};
   col.forEach((key, i) => obj[key] = arr[i]);
   return obj;
+}
+function selectcol(sel, arr) {
+  return arr.map((item) => {
+    let obj = {};
+    sel.forEach((key) => obj[key] = item[key]);
+    return obj;
+  });
 }
 function array_equal(a, b) {
   let n = a.length;
@@ -52,12 +58,12 @@ function savecur() {
     let upd_item = id2item.get(curedit[colmap['id']]);
     if (upd_item && !upd_item.locked) {
       let upd_data = ziprow(ocrresult.col, upd_item.r);
-      let upd_text = app.$refs.editbox.value;
+      let upd_text = app.geteditboxval();
       if (upd_data.state == 'done' && upd_data.ocrtext != upd_text) {
         upd_data.ocrtext = curedit[colmap['ocrtext']] = upd_text;
         tbllock(upd_item);
         app.refreshafter(axios.post('/updateresult', {
-          changes: [upd_data],
+          changes: selectcol(['id','ocrtext'], [upd_data]),
           checkpoint: '“手动修改：'+upd_data.ocrtext+'”之前',
           message: '手动修改已保存：'+upd_data.ocrtext,
           compatlog: true,
@@ -82,7 +88,7 @@ function tbledit(item, scrolltype) {
     }
     app.$refs.editbox.readOnly = item.locked;
     if (item.locked || change_item || (curedit && array_cmp(curedit, newedit) != 0)) {
-      app.$refs.editbox.value = newedit[colmap['ocrtext']];
+      app.seteditboxval(newedit[colmap['ocrtext']]);
       app.$refs.editbox.focus();
       app.$refs.editbox.setSelectionRange(0, 0);
       app.setocrsel(1, [newedit[colmap['top']], newedit[colmap['bottom']]]);
@@ -91,7 +97,7 @@ function tbledit(item, scrolltype) {
     if (curedit) {
       savecur();
     }
-    app.$refs.editbox.value = '';
+    app.seteditboxval('');
     app.$refs.editbox.readOnly = true;
     app.setocrsel(0);
   }
@@ -546,6 +552,7 @@ app = new Vue({
     tblsort: tblsortfunc[0][1],
     tblfltfunc: tblfltfunc,
     tblflt: tblfltfunc[0][1],
+    tblfltedit: tblfltfunc[0][1],
     tblflterr: false,
     selinfo: '',
     selinfo2: '',
@@ -697,6 +704,7 @@ function (items) {
     },
     tblflt(newflt, oldflt) {
       if (newflt != oldflt) {
+        this.tblfltedit = newflt;
         setviewopt(newflt, null);
       }
     },
@@ -840,7 +848,7 @@ function (items) {
           curedit[colmap['bottom']] = bottom;
         }
         app.refreshafter(axios.post('/updateresult', {
-          changes: changes,
+          changes: selectcol(['id','top','bottom'], changes),
           checkpoint: '“修改'+selrange.length+'条字幕的OCR范围”之前',
           message: '已修改'+selrange.length+'条字幕的OCR范围',
           compatlog: true,
@@ -871,10 +879,37 @@ function (items) {
       ref.style.textDecoration = '';
     },
 
+    geteditboxval() {
+      return this.$refs.editbox.value.replaceAll('\\n', '\n');
+    },
+    seteditboxval(s) {
+      this.$refs.editbox.value = s.replaceAll('\n', '\\n');
+    },
+    editboxcut(e) {
+      let sel = window.getSelection();
+      e.clipboardData.setData('text/plain', sel.toString().replaceAll('\\n', '\n'));
+      sel.deleteFromDocument();
+      e.preventDefault();
+    },
+    editboxcopy(e) {
+      e.clipboardData.setData('text/plain', window.getSelection().toString().replaceAll('\\n', '\n'));
+      e.preventDefault();
+    },
+    editboxpaste(e) {
+      e.preventDefault();
+      let s = e.clipboardData.getData('text/plain').replaceAll('\n', '\\n');
+      let v = this.$refs.editbox.value;
+      let st = this.$refs.editbox.selectionStart;
+      let ed = this.$refs.editbox.selectionEnd;
+      this.$refs.editbox.value = v.substring(0, st) + s + v.substring(ed, v.length);
+      this.$refs.editbox.selectionStart = this.$refs.editbox.selectionEnd = st + s.length;
+    },
 
-    findneighbor() {
-      if (!curedit) return [null, null, null];
-      let curid = curedit[colmap['id']];
+    findneighbor(curid) {
+      if (curid === undefined) {
+        if (!curedit) return [null, null, null];
+        curid = curedit[colmap['id']];
+      }
       let curr = null;
       let prev = null;
       let next = null;
@@ -898,8 +933,7 @@ function (items) {
       }
       return [prev, curr, next];
     },
-    mergeprev() {
-      let [prev, curr, next] = this.findneighbor();
+    mergeneighbor(prev, curr, replace, nextcursor) {
       if (prev && curr && !curr.locked) {
         let item = ziprow(ocrresult.col, curr.r);
         if (item.state != 'done') {
@@ -912,16 +946,19 @@ function (items) {
         if (item.frame_start - 1 == prev.r[colmap['frame_end']]) { // 相邻
           let lastitem = ziprow(ocrresult.col, trueprev.r);
           lastitem.frame_end = item.frame_end;
+          if (replace) {
+            lastitem.ocrtext = this.geteditboxval();
+          }
           item.state = 'merged';
           item.comment = '已合并到上一字幕';
-          if (next) tbledit(next, 1);
+          if (nextcursor) tbledit(nextcursor, 1);
           tbllock(prev);
           tbllock(trueprev);
           tbllock(curr, true);
           curr.mergedto = trueprev;
           updatetbledit();
           this.refreshafter(axios.post('/updateresult', {
-            changes: [lastitem, item],
+            changes: selectcol(['id','frame_end'].concat(replace ? ['ocrtext'] : []), [lastitem]).concat(selectcol(['id','state','comment'], [item])),
             checkpoint: '“与上条合并：'+lastitem.ocrtext+'”之前',
             message: '已合并到上一字幕：'+lastitem.ocrtext,
             compatlog: true,
@@ -931,6 +968,14 @@ function (items) {
           alert('起始帧与上条字幕结束帧不相邻，拒绝合并');
         }
       }
+    },
+    mergeprev() {
+      let [prev, curr, next] = this.findneighbor();
+      this.mergeneighbor(prev, curr, false, next);
+    },
+    replaceprev() {
+      let [prev, curr, next] = this.findneighbor();
+      this.mergeneighbor(prev, curr, true, next);
     },
     jumpprev() {
       let prev = this.findneighbor()[0];
@@ -954,7 +999,11 @@ function (items) {
       } else if (e.keyCode == 40 || (e.keyCode == 13 && !e.ctrlKey)) {
         this.jumpnext();
       } else if (e.keyCode == 13 && e.ctrlKey) {
-        this.mergeprev();
+        if (e.shiftKey) {
+          this.replaceprev();
+        } else {
+          this.mergeprev();
+        }
       } else if (e.key === "Escape") {
         tbledit(null);
       } else {
@@ -1003,9 +1052,8 @@ function (items) {
         alert('错误: ('+e.lineNumber+'行 '+ e.columnNumber+'列)\n'+e);
         return;
       }
-
-      let item = id2item.get(curedit[colmap['id']]);
-      let newitem = ziprow(ocrresult.col, item.r);
+      
+      let newitem = { id: curedit[colmap['id']] };
       for (let [key, value] of Object.entries(changes)) {
         if (key == 'id') continue;
         newitem[key] = value;
@@ -1016,7 +1064,7 @@ function (items) {
         message: '已保存高级修改：'+JSON.stringify(changes),
         compatlog: true,
       }));
-      tbllock(item);
+      tbllock(id2item.get(newitem.id));
       this.adveditor = 0;
     },
     adveditcancel() {
@@ -1133,6 +1181,13 @@ function (items) {
         }
       }
       ctx.putImageData(this.pixeldata, 0, 0);
+    },
+
+    tblfltkeydown(e) {
+      if (e.keyCode == 13) {
+        e.preventDefault();
+        this.tblflt = this.tblfltedit;
+      }
     },
 
     tblselall() {

@@ -10,6 +10,13 @@ html, body {
   overflow-x: hidden;
   overflow-y: auto;
 }
+input, select {
+  font-family: Tahoma, '宋体', SimSun, sans-serif;
+  font-size: 14px;
+}
+input:focus, select:focus {
+  outline: none;
+}
 a {
   color: blue;
   text-decoration: underline;
@@ -198,6 +205,7 @@ div.toolbox > div.text {
   right: 0;
 }
 #editor > div > div {
+  min-width: max-content;
   position: absolute;
   bottom: 0;
 }
@@ -275,7 +283,6 @@ div.toolbox > div.text {
   border: 1px solid black;
   box-sizing: border-box;
   vertical-align: middle;
-  font-size: 14px;
 }
 #op input[type='file'] {
   display: none;
@@ -284,7 +291,6 @@ div.toolbox > div.text {
   width: 150px;
   height: 26px;
   box-sizing: border-box;
-  font-size: 14px;
   border: 1px solid black;
   vertical-align: middle;
   background-color: greenyellow;
@@ -445,6 +451,9 @@ table tr:last-child td {
 #text > table td:nth-child(4) {
   width: 100%;
   white-space: pre-wrap;
+}
+#text > table tr {
+  scroll-margin-bottom: 30px;
 }
 #text > table tr[data-state='waitocr'] {
   background-color: lightgray;

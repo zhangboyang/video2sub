@@ -228,12 +228,12 @@ try:
                     api('/saveconfig', {'key':'OCR', 'value':ocrconfig, 'msg':'设定批处理OCR设置: '+str(ocrconfig)})
                     if state['nresult'] == 0:
                         print('数据库中无任何OCR记录, 执行“新OCR”操作')
-                        ret = api('/startocr', {'ocr_range': None})
+                        ret = api('/startocr', {'frame_range': None})
                     else:
                         print('数据库中有待处理的项目，执行“继续OCR”操作')
-                        ret = api('/continueocr', {'ocr_range': None, 'restarttype': ''})
+                        ret = api('/continueocr', {'item_range': None, 'restarttype': ''})
                     if ret == b'ok':
-                        while api('/state')['ocrjob']:
+                        while api('/state')['ocractive']:
                             watch()
                             time.sleep(1)
                     else:
