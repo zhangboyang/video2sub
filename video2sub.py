@@ -565,6 +565,8 @@ def run_ocrjob():
         log(msg, 'I', db=conn)
     msg = 'OCR任务已完成(空项数%d)'%emptycnt if errcnt == 0 else 'OCR任务已完成(空项数%d)，但有%d个错误发生，请使用“继续OCR”功能来重试错误项'%(emptycnt,errcnt)
     log(msg, 'S', db=conn)
+    if emptycnt:
+        log('OCR结果中有空项，请注意处理', 'W', db=conn)
     conn.commit()
     conn.close()
     cap.close()
@@ -713,15 +715,20 @@ def serve_logs():
 def serve_state():
     loaded = not init_thread.is_alive()
     ocractive = ocr_thread is not None and ocr_thread.is_alive()
-    nresult = c.execute('SELECT COUNT(id) FROM ocrresult').fetchone()[0]
-    nwaitocr = c.execute("SELECT COUNT(id) FROM ocrresult WHERE state = 'waitocr'").fetchone()[0]
-    nerror = c.execute("SELECT COUNT(id) FROM ocrresult WHERE state = 'error'").fetchone()[0]
+    lastjob = c.execute("SELECT COUNT(id) FROM ocrresult WHERE state = 'waitocr' or state = 'error'").fetchone()[0]
+
+    ocrconf = json.loads(getconfig(conn, 'OCR'))
+    ocrtop, ocrbottom = ocrconf['top'], ocrconf['bottom']
+    if ocrtop >= 0 and ocrbottom >= 0:
+        curarea = c.execute('SELECT COUNT(id) FROM ocrresult WHERE top = ? AND bottom = ?', (ocrtop, ocrbottom)).fetchone()[0]
+    else:
+        curarea = 0
+
     return flask.jsonify({
         'loaded': loaded,
         'ocractive': ocractive,
-        'nresult': nresult,
-        'nwaitocr': nwaitocr,
-        'nerror': nerror,
+        'lastjob': lastjob,
+        'curarea': curarea,
     })
 
 @app.route('/exportass', methods=['POST'])
@@ -936,10 +943,8 @@ def serve_startocr():
         log('请等待后端启动完成', 'E', db=conn)
         conn.commit()
         return ''
-    ocrconf = getconfig(conn, 'OCR')
-    ocrconf = json.loads(ocrconf) if ocrconf else {}
-    ocrtop = ocrconf['top'] if 'top' in ocrconf else -1
-    ocrbottom = ocrconf['bottom'] if 'bottom' in ocrconf else -1
+    ocrconf = json.loads(getconfig(conn, 'OCR'))
+    ocrengine, ocrtop, ocrbottom = ocrconf['engine'], ocrconf['top'], ocrconf['bottom']
     if ocrtop < 0 or ocrbottom < 0:
         log('请先指定字幕在屏幕上的范围', 'E', db=conn)
         conn.commit()
@@ -955,7 +960,7 @@ def serve_startocr():
         frame_range = list(range(0, nframes))
     c.execute('DELETE FROM jobrange')
     for frame_id in sorted(frame_range):
-        c.execute("INSERT INTO ocrresult (date, state, frame_start, frame_end, engine, top, bottom) VALUES (datetime('now','localtime'), ?, ?, ?, ?, ?, ?)", ('waitocr', frame_id, frame_id, ocrconf['engine'], ocrtop, ocrbottom))
+        c.execute("INSERT INTO ocrresult (date, state, frame_start, frame_end, engine, top, bottom) VALUES (datetime('now','localtime'), ?, ?, ?, ?, ?, ?)", ('waitocr', frame_id, frame_id, ocrengine, ocrtop, ocrbottom))
         c.execute('INSERT INTO jobrange VALUES (?)', (c.lastrowid,))
     log('OCR任务已提交', db=conn)
     conn.commit()

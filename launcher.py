@@ -23,11 +23,9 @@ sys.stdout.reconfigure(errors='replace')
 sys.stderr.reconfigure(errors='replace')
 
 if getattr(sys, 'frozen', False) and hasattr(sys, '_MEIPASS'):
-    bundle_dir = sys._MEIPASS
+    bundle_dir = os.path.abspath(sys._MEIPASS)
 else:
     bundle_dir = os.path.dirname(os.path.abspath(__file__))
-
-os.chdir(bundle_dir)
 
 EXTENSIONS_VIDEO = "*.3g2;*.3gp;*.3gp2;*.3gpp;*.amv;*.asf;*.avi;*.bik;*.bin;*.crf;*.dav;*.divx;*.drc;*.dv;*.dvr-ms;*.evo;*.f4v;*.flv;*.gvi;*.gxf;*.iso;*.m1v;*.m2v;" \
     "*.m2t;*.m2ts;*.m4v;*.mkv;*.mov;*.mp2;*.mp2v;*.mp4;*.mp4v;*.mpe;*.mpeg;*.mpeg1;" \
@@ -40,7 +38,7 @@ class BackendDiedError(Exception):
 
 fail = False
 
-gconfig = ast.literal_eval(open('config.txt', 'r', encoding='utf_8_sig').read())
+gconfig = ast.literal_eval(open(os.path.join(bundle_dir, 'config.txt'), 'r', encoding='utf_8_sig').read())
 url = None
 backend = None
 frontend = None
@@ -48,7 +46,7 @@ session = None
 lastwatch = None
 video = None
 backendlog = None
-backendlog_file = 'backendlog_%s_%d.txt' % (datetime.now().strftime('%Y%m%d_%H%M%S'), os.getpid())
+backendlog_file = os.path.join(bundle_dir, 'backendlog_%s_%d.txt' % (datetime.now().strftime('%Y%m%d_%H%M%S'), os.getpid()))
 
 def drop_backendlog():
     global backendlog
@@ -185,6 +183,8 @@ try:
                 files = [os.path.join(files[0], file) for file in files[1:]]
         except win32gui.error:
             pass
+    files = [os.path.abspath(p) for p in files]
+    os.chdir(bundle_dir)
     if len(files) == 0:
         print('使用方法：')
         print('  %s [视频文件...]'%os.path.basename(sys.argv[0]))
@@ -199,6 +199,7 @@ try:
     elif len(files) > 1:
         start_time = time.time()
         print('批处理模式')
+        print('=====')
         print('将要按顺序处理以下文件：\n  '+'\n  '.join(map(os.path.basename, files)))
         print('正从第一个文件“%s”中读取OCR设置'%os.path.basename(files[0]))
         run_backend(files[0], silent=True)
@@ -208,6 +209,7 @@ try:
         print('将要使用的OCR设置:', ocrconfig)
         success = 0
         for file in files:
+            print('=====')
             print('正处理:', os.path.basename(file))
             run_backend(file, silent=True)
             time.sleep(1)
@@ -216,22 +218,25 @@ try:
                 watch()
                 time.sleep(1)
             watch()
-            info = api('/info')
             for i in range(9999999):
+                api('/saveconfig', {'key':'OCR', 'value':ocrconfig, 'msg':'设定批处理OCR设置: '+str(ocrconfig)})
                 state = api('/state')
-                if state['nresult'] == 0 or state['nwaitocr'] > 0 or state['nerror'] > 0:
+                if state['lastjob'] > 0 or state['curarea'] == 0:
                     if i > 10:
-                        print('重试次数过多，已放弃')
+                        print('迭代次数过多，已放弃')
                         break
                     if i > 0:
-                        print('重试(第%d次)'%i)
-                    api('/saveconfig', {'key':'OCR', 'value':ocrconfig, 'msg':'设定批处理OCR设置: '+str(ocrconfig)})
-                    if state['nresult'] == 0:
-                        print('数据库中无任何OCR记录, 执行“新OCR”操作')
+                        print('迭代(第%d次)'%i)
+
+                    if state['lastjob'] > 0:
+                        print('数据库中有未处理完毕的项目，执行“继续OCR”操作')
+                        ret = api('/continueocr', {'item_range': None, 'restarttype': ''})
+                    elif state['curarea'] == 0:
+                        print('数据库中无该OCR区域的项目, 执行“新OCR”操作')
                         ret = api('/startocr', {'frame_range': None})
                     else:
-                        print('数据库中有待处理的项目，执行“继续OCR”操作')
-                        ret = api('/continueocr', {'item_range': None, 'restarttype': ''})
+                        assert False
+
                     if ret == b'ok':
                         while api('/state')['ocractive']:
                             watch()
@@ -248,7 +253,11 @@ try:
             backend.kill()
             backend.wait()
             print('耗时%.2f秒'%(time.time() - file_start_time))
+        print('=====')
         print('共%d个文件，成功%d个，耗时%.2f秒'%(len(files),success,time.time()-start_time))
+        if windows:
+            print('按回车退出程序')
+            input()
 except KeyboardInterrupt:
     print('用户手动中断')
 except Exception as e:

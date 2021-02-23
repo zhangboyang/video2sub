@@ -494,6 +494,9 @@ table tr:last-child td {
 #text > table tr[data-lock='locked'] {
   text-decoration: line-through;
 }
+#text > table tr[data-half='top'] td:nth-child(2) {
+  color: gray;
+}
 #text > table tr[data-empty='empty'] td:nth-child(4) {
   color: gray;
 }

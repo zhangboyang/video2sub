@@ -70,7 +70,7 @@
                 <a class="button" @click.prevent="jumppos(1)">结束帧<div class="bl">显示本条字幕的最后一帧</div></a>
               </div>
             </div>
-            <input type="text" ref="editbox" @keydown="editorkeydown" @copy="editboxcopy" @cut="editboxcut" @paste="editboxpaste" :style="{ width: Math.round(info.width*Math.max(framescale, 360/info.height))+'px', 'min-width': Math.round(info.width*Math.max(framescale, 360/info.height))+'px', 'font-size': editorfontsize+'px' }" spellcheck="false">
+            <input type="text" ref="editbox" @keydown="editorkeydown" @input="editboxinput" @copy="editboxcopy" @cut="editboxcut" @paste="editboxpaste" :style="{ width: Math.round(info.width*Math.max(framescale, 360/info.height))+'px', 'min-width': Math.round(info.width*Math.max(framescale, 360/info.height))+'px', 'font-size': editorfontsize+'px' }" spellcheck="false">
             <div>
               <div>
                 <a class="button" @click.prevent="jumpprev">上<div class="bl">跳转到上一条字幕<br>快捷键：<br>&nbsp;方向键上<br>&nbsp;或鼠标滚轮上</div></a>
@@ -153,7 +153,7 @@
               <a class="button" @click.prevent="checkselect()&&runscript(myscript.scripts.find(s=>s.name=='删除'))">删除<div class="bl">删除选中的字幕</div></a>
               <a class="button" @click.prevent="checkselect()&&runscript(myscript.scripts.find(s=>s.name=='克隆'))">克隆<div class="bl">克隆一份选中的字幕</div></a>
               &nbsp;
-              <a class="button" @click.prevent="showcodeedit(1)">执行自定义脚本<div class="bl">执行自定义JavaScript脚本</div></a>
+              <a class="button" @click.prevent="checkselect(true)&&showcodeedit(1)">执行自定义脚本<div class="bl">执行自定义JavaScript脚本</div></a>
             </div>
             <div id="engine">
               引擎：

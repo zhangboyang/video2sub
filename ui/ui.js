@@ -90,7 +90,6 @@ function tbledit(item, scrolltype) {
     if (item.locked || change_item || (curedit && array_cmp(curedit, newedit) != 0)) {
       app.seteditboxval(newedit[colmap['ocrtext']]);
       app.$refs.editbox.focus();
-      app.$refs.editbox.setSelectionRange(0, 0);
       app.setocrsel(1, [newedit[colmap['top']], newedit[colmap['bottom']]]);
     }
   } else {
@@ -145,6 +144,7 @@ var viewopt = {
 };
 var tblsortfunc = [
   ['按帧范围','[frame_start,frame_end,top,bottom,engine,id]'],
+  ['按上/下半屏',''/* updated in app.mounted() */],
   ['按帧OCR区域','[top,bottom,frame_start,frame_end,engine,id]'],
   ['按引擎名称','[engine,frame_start,frame_end,top,bottom,id]'],
 ];
@@ -152,6 +152,7 @@ var tblfltfunc = [
   ['全部','true'],
   ['上半屏',''/* updated in app.mounted() */],
   ['下半屏',''/* updated in app.mounted() */],
+  ['所有空项',"state == 'done' && ocrtext == ''"],
   ['所有非空',"state == 'done' && ocrtext != ''"],
   ['待清理',"state == 'merged' || (state == 'done' && ocrtext == '')"],
   ['等待OCR',"state == 'waitocr'"],
@@ -346,6 +347,7 @@ function updateelement(item, lastele, rebuildtable) {
   let row = ziprow(ocrresult.col, item.r);
   item.ele.dataset.state = row.state;
   item.ele.dataset.empty = row.ocrtext == '' ? 'empty' : '';
+  item.ele.dataset.half = row.bottom >= Math.floor(app.info.height / 2) ? 'bottom' : 'top';
   item.ele.children[0].innerText = row.frame_start + '-' + row.frame_end;
   item.ele.children[1].innerText = row.top + '-' + row.bottom;
   item.ele.children[2].innerText = row.engine;
@@ -544,6 +546,8 @@ app = new Vue({
     mousepos: -1, mouseposdown: 0, // timebar
     pixeldata: null,
 
+    editboxundoinfo: null,
+    editboxredoinfo: null,
     editorfontsize: 20,
     adveditor: 0,
     adveditcm: null,
@@ -642,20 +646,23 @@ function (items) {
 ` },
       { name: '清理', locked: true, value: `// 清理：删除空字幕、被合并字幕
 function (items) {
-  let n = 0;
-  for (let item of items) {
-    // 删除空字幕
-    if (item.state == 'done' && item.ocrtext == '') {
-      item.state = 'delete';
-      n++;
+  if (confirm('确定要删除空字幕、被合并字幕吗？\\n提示：是否已检查“假空项”（有文字但被误识别为无文字）？')) {
+    let nempty = 0, nmerged = 0;
+    for (let item of items) {
+      // 删除空字幕
+      if (item.state == 'done' && item.ocrtext == '') {
+        item.state = 'delete';
+        nempty++;
+      }
+      // 删除被合并字幕
+      if (item.state == 'merged') {
+        item.state = 'delete';
+        nmerged++;
+      }
     }
-    // 删除被合并字幕
-    if (item.state == 'merged') {
-      item.state = 'delete';
-      n++;
-    }
+    return '清理了' + nempty + '条空字幕，' + nmerged + '条被合并字幕';
   }
-  return '清理了' + n + '条字幕';
+  return '没有清理字幕';
 }
 ` },
       { name: '删除', locked: true, value: `// 删除：删除操作范围内的所有字幕
@@ -723,6 +730,7 @@ function (items) {
     this.myscript.scripts = this.defaultscripts.concat(this.myscript.scripts.filter((s)=>!s.locked));
     this.scriptsel = this.myscript.scripts.slice(-1)[0];
     this.pos = 0;
+    this.tblsortfunc.find((f) => f[0] == '按上/下半屏')[1] = '[(bottom>=' + Math.floor(this.info.height / 2)+'?1:0),frame_start,frame_end,top,bottom,engine,id]'
     this.tblfltfunc.find((f) => f[0] == '上半屏')[1] = 'bottom < ' + Math.floor(this.info.height / 2);
     this.tblfltfunc.find((f) => f[0] == '下半屏')[1] = 'bottom >= ' + Math.floor(this.info.height / 2);
     tbledit(null);
@@ -879,30 +887,83 @@ function (items) {
       ref.style.textDecoration = '';
     },
 
+    seteditboxvalinternal(s) {
+      this.$refs.editbox.value = '';
+      this.$refs.editbox.value = s;
+    },
     geteditboxval() {
       return this.$refs.editbox.value.replaceAll('\\n', '\n');
     },
     seteditboxval(s) {
-      this.$refs.editbox.value = s.replaceAll('\n', '\\n');
+      this.seteditboxvalinternal(s.replaceAll('\n', '\\n'));
+      this.$refs.editbox.setSelectionRange(0, 0);
+      this.editboxsavehistory(-1, -1);
     },
-    editboxcut(e) {
-      let sel = window.getSelection();
-      e.clipboardData.setData('text/plain', sel.toString().replaceAll('\\n', '\n'));
-      sel.deleteFromDocument();
-      e.preventDefault();
-    },
-    editboxcopy(e) {
-      e.clipboardData.setData('text/plain', window.getSelection().toString().replaceAll('\\n', '\n'));
-      e.preventDefault();
-    },
-    editboxpaste(e) {
-      e.preventDefault();
-      let s = e.clipboardData.getData('text/plain').replaceAll('\n', '\\n');
+    editboxselinfo() {
       let v = this.$refs.editbox.value;
       let st = this.$refs.editbox.selectionStart;
       let ed = this.$refs.editbox.selectionEnd;
-      this.$refs.editbox.value = v.substring(0, st) + s + v.substring(ed, v.length);
-      this.$refs.editbox.selectionStart = this.$refs.editbox.selectionEnd = st + s.length;
+      return [v, st, ed];
+    },
+    editboxsavehistory(undo, redo) {
+      this.editboxundoinfo = undo > 0 ? this.editboxselinfo() : (undo < 0 ? null : [null,null,null]);
+      this.editboxredoinfo = redo > 0 ? this.editboxselinfo() : (redo < 0 ? null : [null,null,null]);
+    },
+    editboxundo(e) {
+      if (this.editboxundoinfo) {
+        let [v, st, ed] = this.editboxundoinfo;
+        if (v !== null) {
+          this.editboxsavehistory(0, 1);
+          this.seteditboxvalinternal(v);
+          this.$refs.editbox.selectionStart = st;
+          this.$refs.editbox.selectionEnd = ed;
+        }
+        e.preventDefault();
+      }
+    },
+    editboxredo(e) {
+      if (this.editboxredoinfo) {
+        let [v, st, ed] = this.editboxredoinfo;
+        if (v !== null) {
+          this.editboxsavehistory(1, 0);
+          this.seteditboxvalinternal(v);
+          this.$refs.editbox.selectionStart = st;
+          this.$refs.editbox.selectionEnd = ed;
+        }
+        e.preventDefault();
+      }
+    },
+    editboxinput(e) {
+      if (!e.isComposing) {
+        this.editboxsavehistory(-1, -1);
+      }
+    },
+    editboxcut(e) {
+      let [v, st, ed] = this.editboxselinfo();
+      if (v.substring(st, ed).length > 0) {
+        this.editboxsavehistory(1, 0);
+        e.clipboardData.setData('text/plain', v.substring(st, ed).replaceAll('\\n', '\n'));
+        this.seteditboxvalinternal(v.substring(0, st) + v.substring(ed, v.length));
+        this.$refs.editbox.selectionStart = this.$refs.editbox.selectionEnd = st;
+      }
+      e.preventDefault();
+    },
+    editboxcopy(e) {
+      let [v, st, ed] = this.editboxselinfo();
+      if (v.substring(st, ed).length > 0) {
+        e.clipboardData.setData('text/plain', v.substring(st, ed).replaceAll('\\n', '\n'));
+      }
+      e.preventDefault();
+    },
+    editboxpaste(e) {
+      let s = e.clipboardData.getData('text/plain').replaceAll('\n', '\\n');
+      if (s.length > 0) {
+        this.editboxsavehistory(1, 0);
+        let [v, st, ed] = this.editboxselinfo();
+        this.seteditboxvalinternal(v.substring(0, st) + s + v.substring(ed, v.length));
+        this.$refs.editbox.selectionStart = this.$refs.editbox.selectionEnd = st + s.length;
+      }
+      e.preventDefault();
     },
 
     findneighbor(curid) {
@@ -994,6 +1055,14 @@ function (items) {
       }
     },
     editorkeydown(e) {
+      if (e.keyCode == 90 && e.ctrlKey) {
+        if (e.shiftKey) {
+          this.editboxredo(e);
+        } else {
+          this.editboxundo(e);
+        }
+        return;
+      }
       if (e.keyCode == 38) {
         this.jumpprev();
       } else if (e.keyCode == 40 || (e.keyCode == 13 && !e.ctrlKey)) {
@@ -1005,6 +1074,7 @@ function (items) {
           this.mergeprev();
         }
       } else if (e.key === "Escape") {
+        curedit = null;
         tbledit(null);
       } else {
         return;
@@ -1049,7 +1119,8 @@ function (items) {
       try {
         changes = compile_expr([], [], this.adveditcm.getDoc().getValue())();
       } catch (e) {
-        alert('错误: ('+e.lineNumber+'行 '+ e.columnNumber+'列)\n'+e);
+        console.log(e);
+        alert('错误: ' + ('lineNumber' in e ? '('+e.lineNumber+'行 '+e.columnNumber+'列)' : '') + '\n' + e + '\n按Ctrl+Shift+I可打开控制台查看更多信息');
         return;
       }
       
@@ -1284,10 +1355,16 @@ function (items) {
       this.scriptuploadtimer = null;
       this.saveconfig('SCRIPT', this.myscript, '');
     },
-    checkselect() {
+    checkselect(permissive) {
       if (!tblitem.some((item) => tblselect.has(item))) {
-        alert('请先选中要处理的字幕');
-        return false;
+        if (permissive) {
+          if (!confirm('没有选择要处理的字幕，继续吗？')) {
+            return false;
+          }
+        } else {
+          alert('请先选中要处理的字幕');
+          return false;
+        }
       }
       return true;
     },
@@ -1297,7 +1374,8 @@ function (items) {
       try {
         f = compile_func(['alert', 'confirm'], s.value);
       } catch(e) {
-        alert('语法错误: ('+e.lineNumber+'行 '+ e.columnNumber+'列)\n'+e);
+        console.log(e);
+        alert('语法错误: ' + ('lineNumber' in e ? '('+e.lineNumber+'行 '+e.columnNumber+'列)' : '') + '\n' + e + '\n按Ctrl+Shift+I可打开控制台查看更多信息');
         return false;
       }
       let items = sortedview().filter((item) => tblselect.has(item)).map((item) => ziprow(ocrresult.col, item.r));
@@ -1305,7 +1383,8 @@ function (items) {
       try {
         message = f(items);
       } catch(e) {
-        alert('运行时错误:\n'+e);
+        console.log(e);
+        alert('运行时错误:\n' + e + '\n按Ctrl+Shift+I可打开控制台查看更多信息');
         return false;
       }
       //console.log(old);
