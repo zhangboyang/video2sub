@@ -112,20 +112,34 @@ div.imgdb {
 div.imgdb > img {
   position: absolute;
 }
-
+#video.editorup {
+  flex-direction: column-reverse;
+}
 #video {
+  display: flex;
   user-select: none;
+  flex-direction: column;
 }
 #framearea {
   display: flex;
+  margin-bottom: 5px;
 }
 #framebox {
-  display: block;
+  display: flex;
+  flex-direction: column;
   margin: 0 10px;
+}
+.editorup #framebox {
+  flex-direction: column-reverse;
 }
 #frametitle {
   border: 1px solid black;
   border-bottom: 0;
+}
+.editorup #frametitle {
+  border: 1px solid black;
+  border-bottom: 1px solid black;
+  border-top: 0;
 }
 #frame {
   border: 1px solid black;
@@ -183,6 +197,15 @@ div.toolbox > div.text {
 }
 .neighborframe {
   float: right;
+  display: flex;
+  flex-direction: column;
+}
+.editorup .neighborframe {
+  flex-direction: column-reverse;
+}
+.editorup div.neighborframe.toolbox > div:not(:first-child) {
+  border-top: 0;
+  border-bottom: 1px solid gray;
 }
 #dispsize, #ocrinfo {
   margin-top: 15px;
@@ -193,7 +216,7 @@ div.toolbox > div.text {
 }
 
 #editor {
-  padding: 5px;
+  margin-bottom: 5px;
   display: flex;
 }
 #editor > div {
@@ -494,7 +517,7 @@ table tr:last-child td {
 #text > table tr[data-lock='locked'] {
   text-decoration: line-through;
 }
-#text > table tr[data-half='top'] td:nth-child(2) {
+#text > table tr:not([data-position="2"]) td:nth-child(2) {
   color: gray;
 }
 #text > table tr[data-empty='empty'] td:nth-child(4) {
@@ -607,7 +630,7 @@ table tr:last-child td {
   border: 1px solid black;
   background-color: white;
   width: 600px;
-  height: 550px;
+  height: 600px;
   position: absolute;
   margin: auto;
   z-index: 20;

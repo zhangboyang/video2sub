@@ -13,7 +13,7 @@
     <div id="app" v-cloak>
       <div id="apparea" v-show="loaded">
         <div id="title">{{info.file}} ({{info.width}}x{{info.height}}, {{info.nframes}}帧, {{info.fps}}fps)</div>
-        <div id="video" @wheel="editorwheel">
+        <div id="video" @wheel="editorwheel" :class="{ editorup: editorup }">
           <div id="framearea" :style="{ height: (getdisph()+27)+'px' }">
             <div id="frameleft">
               <div class="toolbox neighborframe">
@@ -62,8 +62,9 @@
             </div>
           </div>
           <div id="editor">
-            <div :style="{'min-width': 'calc(' + info.thumb_w + 'px + 5px)'}">
+            <div :style="{'min-width': 'calc(' + info.thumb_w + 'px + 10px)'}">
               <div>
+                <a class="button" @click.prevent="editorup^=1">{{editorup?'底':'顶'}}<div class="bl">将编辑框显示在{{editorup?'底部':'顶部'}}</div></a>
                 <a class="button" @click.prevent="editorfontsize=Math.min(editorfontsize+1,50)">显示＋<div class="bl">让右侧文本框文字变大</div></a>
                 <a class="button" @click.prevent="editorfontsize=Math.max(editorfontsize-1,16)">显示－<div class="bl">让右侧文本框文字变小</div></a>
                 <a class="button" @click.prevent="jumppos(0)">起始帧<div class="bl">显示本条字幕的第一帧</div></a>
@@ -103,7 +104,7 @@
             <div id="tblfilter">
               筛选
               <select v-model="tblflt">
-                <option v-for="i in tblfltfunc" :value="i[1]">{{i[0]}}</option>
+                <option v-for="i in tblfltfunc" :value="i[1]" :disabled="i[1]===null">{{i[0]}}</option>
               </select>
             </div>
             <input id="tblfltcustom" type="text" v-model="tblfltedit" @keydown="tblfltkeydown" :style="{'background-color': tblfltedit==tblflt ? (tblflterr ? 'lightpink':'azure') : 'lemonchiffon'}" title="自定义JavaScript表达式，按回车应用，具体参数详见“高级编辑”或“执行自定义脚本”功能" spellcheck="false">
@@ -157,10 +158,10 @@
             </div>
             <div id="engine">
               引擎：
-              <a class="button" @click.prevent="startocr">新OCR<div class="bl">对范围内所有帧，新建一条字幕项并执行OCR<br>一般该操作只需要执行一次</div></a>
               <select v-model="ocrconfig.engine" @change="saveconfig('OCR', ocrconfig, 'OCR引擎已设定为：'+engines.get(ocrconfig.engine))">
                 <option v-for="engine in Array.from(engines.entries())" :value="engine[0]">{{engine[1]}}</option>
               </select>
+              <a class="button" @click.prevent="startocr">新OCR<div class="bl">对范围内所有帧，新建一条字幕项并执行OCR<br>一般该操作只需要执行一次</div></a>
               <a class="button" @click.prevent="stopocr">暂停OCR<div class="bl">暂停当前运行的OCR任务</div></a>
               <a class="button" @click.prevent="continueocr('')">继续OCR<div class="bl">使用当前设定的引擎，对选中范围内的“等待OCR”字幕和“OCR失败”字幕重新尝试OCR</div></a>
               <a class="button" @click.prevent="continueocr('all')">重新OCR<div class="bl">使用当前设定的引擎重新OCR选中的字幕，并替换现有文本</div></a>
@@ -170,10 +171,6 @@
         </div>
         <div id="logarea" :style="{ height: morelog ? '190px' : '60px' }">
           <div class="buttonbar">
-            <!--<a class="button" @click.prevent="$refs.logs.scrollTop=0">滚动到顶部</a>
-            <a class="button" @click.prevent="$refs.logs.scrollTop=$refs.logs.scrollHeight">滚动到底部</a>
-            <a class="button" @click.prevent="noautoscrollstatus^=1">{{noautoscrollstatus?'启用':'禁止'}}自动滚动</a>
-            <br>-->
             <a class="button" @click.prevent="(checkpointonly^=1)||scrollstatus(),morelog=checkpointonly">{{checkpointonly?'显示所有日志':'只显示恢复点'}}<div class="tr">{{checkpointonly?'在日志栏中显示所有类型日志':'在日志栏中只显示恢复点'}}</div></a>
             <a class="button" @click.prevent="createcheckpoint">创建恢复点<div class="tr">对全部字幕项“存档”，以便需要时“读档”</div></a>
             <a class="button" @click.prevent="checkpointonly=0,(morelog^=1)||scrollstatus()">显示{{morelog?'更少':'更多'}}日志<div class="tr">{{morelog?'减小':'增大'}}日志栏高度</div></a>

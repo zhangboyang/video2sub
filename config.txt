@@ -72,7 +72,7 @@
     },
 
 ## ASS 导出设置 ######################################################
-    'ass_template': {
+    'ass_format': {
         'header':  ################ ASS文件头模板
 '''[Script Info]
 Title: {{文件名}}
@@ -97,5 +97,9 @@ Format: Layer, Start, End, Style, Name, MarginL, MarginR, MarginV, Effect, Text
         'bottom_half':  ################ ASS字幕行模板（下半屏）
 '''Dialogue: 0,{{开始时间}},{{结束时间}},Default,,0,0,0,,{{字幕文本}}
 ''',
+        'time_alignment': {  ################ ASS字幕时间对齐方式
+            #'start': ('floor', 0, +1e-3, 0), 'end': ('floor', 0, +1e-3, 0),  # 适用于MPC-HC播放器
+            'start': ('floor', +0.5, +1e-3, 0), 'end': ('floor', +0.5, +1e-3, 0),  # 适用于VLC播放器
+        },
     },
 }

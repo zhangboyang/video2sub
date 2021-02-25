@@ -134,19 +134,21 @@ height = cap.height
 fps = cap.fps
 nframes = cap.nframes
 
-def frame2sec(n, fps):
-    if not gconfig['fix_ntsc_fps']:
-        return n * fps
+def fpsfix(fps):
     fpsdict = {
-        '23.976': [24000,1001],
-        '29.970': [30000,1001],
-        '59.940': [60000,1001],
+        '23.976': (24000,1001),
+        '29.970': (30000,1001),
+        '59.940': (60000,1001),
     }
     key = '%.3f'%fps
-    if key in fpsdict:
-        return n * fpsdict[key][1] / fpsdict[key][0]
+    if gconfig['fix_ntsc_fps'] and key in fpsdict:
+        return fpsdict[key]
     else:
-        return n * fps
+        return (fps, 1)
+
+def frame2sec(n, fps):
+    a, b = fpsfix(fps)
+    return n * b / a
 
 ##############################################################################
 
@@ -158,9 +160,14 @@ c.execute("INSERT OR IGNORE INTO config VALUES ('create_date', datetime('now','l
 c.execute("INSERT OR IGNORE INTO config VALUES ('create_ver', ?)", (version,))
 
 c.execute("INSERT OR IGNORE INTO config VALUES ('db_ver', ?)", (dbver,))
-if dbver != c.execute("SELECT value FROM config WHERE key = 'db_ver'").fetchone()[0]:
+file_dbver = c.execute("SELECT value FROM config WHERE key = 'db_ver'").fetchone()[0]
+if dbver < file_dbver:
     print("版本过低，请升级")
     sys.exit(1)
+if file_dbver < dbver:
+    print("正在升级数据库")
+    if file_dbver == 1:
+        assert False
 
 c.execute("INSERT OR REPLACE INTO config VALUES ('lastopen_date',datetime('now','localtime'))")
 c.execute("INSERT OR REPLACE INTO config VALUES ('lastopen_ver', ?)", (version,))
@@ -187,8 +194,11 @@ c.execute('''
         frame_end INT,
         imgdb_id INT,
         engine TEXT,
+        left INT,
         top INT,
+        right INT,
         bottom INT,
+        position INT,
         ocrtext TEXT,
         comment TEXT
     )''')
@@ -197,8 +207,14 @@ c.execute('CREATE INDEX IF NOT EXISTS itemstate ON ocrresult (state)')
 c.execute('CREATE TABLE IF NOT EXISTS jobrange (id INTEGER PRIMARY KEY)')
 
 c.execute('CREATE TABLE IF NOT EXISTS logs (date TEXT, level CHAR(1), message TEXT, checkpoint_id INTEGER)')
-c.execute('CREATE TABLE IF NOT EXISTS checkpoint (checkpoint_id INTEGER PRIMARY KEY AUTOINCREMENT, date TEXT, message TEXT, data BLOB)')
+c.execute('CREATE TABLE IF NOT EXISTS checkpoint (checkpoint_id INTEGER PRIMARY KEY AUTOINCREMENT, dbver INT, date TEXT, message TEXT, data BLOB)')
 
+if file_dbver < dbver:
+    if file_dbver == 1:
+        assert False
+    c.execute("INSERT OR REPLACE INTO config VALUES ('db_ver', ?)", (dbver,))
+    print("数据库升级完成")
+    
 conn.commit()
 
 def getconfig(db, key):
@@ -254,7 +270,7 @@ def checkpoint(message, generate_log=True):
             c.execute('SELECT * FROM ocrresult').fetchall(),
             ensure_ascii=False, separators=(',', ':')).encode(),
         level=1)
-    c.execute("INSERT INTO checkpoint (date, message, data) VALUES (datetime('now','localtime'), ?, ?)", (message, dump))
+    c.execute("INSERT INTO checkpoint (dbver, date, message, data) VALUES (?, datetime('now','localtime'), ?, ?)", (dbver, message, dump))
     checkpoint_id = c.lastrowid
     if generate_log:
         log('已创建恢复点 #%d (%s)'%(checkpoint_id, message), 'C', checkpoint_id=checkpoint_id, db=conn)
@@ -262,12 +278,14 @@ def checkpoint(message, generate_log=True):
     return checkpoint_id
 
 def rollback(checkpoint_id):
-    msg, dump = c.execute('SELECT message, data FROM checkpoint WHERE checkpoint_id = ?', (checkpoint_id,)).fetchone()
+    checkpoint_dbver, msg, dump = c.execute('SELECT dbver, message, data FROM checkpoint WHERE checkpoint_id = ?', (checkpoint_id,)).fetchone()
+    if checkpoint_dbver != dbver:
+        return '版本不符', msg
     c.execute('DELETE FROM ocrresult')
     rows = json.loads(zlib.decompress(dump).decode())
     if len(rows):
         c.executemany('INSERT INTO ocrresult VALUES (' + ','.join(['?']*len(rows[0])) + ')', rows)
-    return msg
+    return None, msg
 
 ##############################################################################
 
@@ -734,7 +752,7 @@ def serve_state():
 @app.route('/exportass', methods=['POST'])
 @session_header_required
 def serve_exportass():
-    row = c.execute("SELECT frame_start, frame_end, ocrtext, top, bottom FROM ocrresult WHERE state = 'done' AND ocrtext != '' ORDER BY frame_start, frame_end").fetchall()
+    row = c.execute("SELECT frame_start, frame_end, ocrtext, top, bottom, position FROM ocrresult WHERE state = 'done' AND ocrtext != '' ORDER BY frame_start, frame_end").fetchall()
     if len(row) == 0:
         log('无字幕数据', 'I', db=conn)
         conn.commit()
@@ -744,21 +762,23 @@ def serve_exportass():
         log('输出文件已存在，请先删除：%s'%outfile, 'E', db=conn)
         conn.commit()
         return ''
-    def sec2str(sec):
-        sec100 = math.ceil(sec*100)
+    def frame2timestr(frame, fps, alignment):
+        fn, shiftframe, eps, shift100 = alignment
+        sec100 = getattr(math, fn)(frame2sec(frame + shiftframe, fps) * 100 + eps) + shift100
+        sec100 = sec100 if sec100 >= 0 else 0
         fs = sec100 % 100
         s = sec100 // 100 % 60
         m = sec100 // 100 // 60 % 60
         h = sec100 // 100 // 60 // 60
         return '%d:%02d:%02d.%02d'%(h,m,s,fs)
-    best_top = c.execute("SELECT top, COUNT(top) cnt FROM ocrresult WHERE state = 'done' AND ocrtext != '' AND bottom < ? GROUP BY top ORDER BY cnt DESC LIMIT 1", (height // 2,)).fetchone()
-    best_bottom = c.execute("SELECT bottom, COUNT(bottom) cnt FROM ocrresult WHERE state = 'done' AND ocrtext != '' AND bottom >= ? GROUP BY bottom ORDER BY cnt DESC LIMIT 1", (height // 2,)).fetchone()
-    best_height = c.execute("SELECT bottom+1-top, COUNT(bottom+1-top) cnt FROM ocrresult WHERE state = 'done' AND ocrtext != '' AND bottom >= ? GROUP BY bottom+1-top ORDER BY cnt DESC LIMIT 1", (height // 2,)).fetchone()
+    best_top = c.execute("SELECT top, COUNT(top) cnt FROM ocrresult WHERE state = 'done' AND ocrtext != '' AND position = 8 GROUP BY top ORDER BY cnt DESC LIMIT 1").fetchone()
+    best_bottom = c.execute("SELECT bottom, COUNT(bottom) cnt FROM ocrresult WHERE state = 'done' AND ocrtext != '' AND position = 2 GROUP BY bottom ORDER BY cnt DESC LIMIT 1").fetchone()
+    best_height = c.execute("SELECT bottom+1-top, COUNT(bottom+1-top) cnt FROM ocrresult WHERE state = 'done' AND ocrtext != '' AND position = 2 GROUP BY bottom+1-top ORDER BY cnt DESC LIMIT 1").fetchone()
     best_top = best_top[0] if best_top is not None else 10
     best_bottom = best_bottom[0] if best_bottom is not None else 10
-    best_height = best_height[0] if best_height is not None else c.execute("SELECT bottom+1-top, COUNT(bottom+1-top) cnt FROM ocrresult WHERE state = 'done' AND ocrtext != '' GROUP BY bottom+1-top ORDER BY cnt DESC LIMIT 1", (height // 2,)).fetchone()[0]
+    best_height = best_height[0] if best_height is not None else c.execute("SELECT bottom+1-top, COUNT(bottom+1-top) cnt FROM ocrresult WHERE state = 'done' AND ocrtext != '' GROUP BY bottom+1-top ORDER BY cnt DESC LIMIT 1").fetchone()[0]
     f = open(outfile, 'w', encoding='utf_8_sig', newline='\r\n')
-    s = gconfig['ass_template']['header']
+    s = gconfig['ass_format']['header']
     s = s.replace('{{文件名}}', os.path.basename(video))
     s = s.replace('{{视频宽度}}', str(width))
     s = s.replace('{{视频高度}}', str(height))
@@ -766,10 +786,10 @@ def serve_exportass():
     s = s.replace('{{上半屏顶边距}}', str(best_top))
     s = s.replace('{{下半屏底边距}}', str(height-best_bottom-1))
     f.write(s)
-    for frame_start, frame_end, ocrtext, top, bottom in row:
-        s = gconfig['ass_template']['bottom_half' if bottom >= height // 2 else 'top_half']
-        start_time = sec2str(frame2sec(frame_start, fps))
-        end_time = sec2str(frame2sec(frame_end+1, fps))
+    for frame_start, frame_end, ocrtext, top, bottom, position in row:
+        s = gconfig['ass_format']['bottom_half' if position == 2 else 'top_half']
+        start_time = frame2timestr(frame_start, fps, gconfig['ass_format']['time_alignment']['start'])
+        end_time = frame2timestr(frame_end+1, fps, gconfig['ass_format']['time_alignment']['end'])
         s = s.replace('{{开始时间}}', start_time)
         s = s.replace('{{结束时间}}', end_time)
         s = s.replace('{{字幕文本}}', ocrtext.replace('\n', '\\N'))
@@ -863,9 +883,12 @@ def serve_rollback():
         return ''
     data = flask.request.get_json()
     checkpoint_id = data['checkpoint_id']
-    msg = rollback(checkpoint_id)
-    log('已还原到恢复点 #%d (%s)'%(checkpoint_id, msg), 'S', db=conn)
-    checkwaitocr(db=conn)
+    err, msg = rollback(checkpoint_id)
+    if err is None:
+        log('已还原到恢复点 #%d (%s)'%(checkpoint_id, msg), 'S', db=conn)
+        checkwaitocr(db=conn)
+    else:
+        log('无法还原到恢复点 #%d (%s)'%(checkpoint_id, err), 'E', db=conn)
     conn.commit()
     return ''
 
@@ -945,6 +968,8 @@ def serve_startocr():
         return ''
     ocrconf = json.loads(getconfig(conn, 'OCR'))
     ocrengine, ocrtop, ocrbottom = ocrconf['engine'], ocrconf['top'], ocrconf['bottom']
+    ocrleft, ocrright = 0, width-1
+    position = 2 if ocrbottom >= height // 2 else 8
     if ocrtop < 0 or ocrbottom < 0:
         log('请先指定字幕在屏幕上的范围', 'E', db=conn)
         conn.commit()
@@ -960,7 +985,7 @@ def serve_startocr():
         frame_range = list(range(0, nframes))
     c.execute('DELETE FROM jobrange')
     for frame_id in sorted(frame_range):
-        c.execute("INSERT INTO ocrresult (date, state, frame_start, frame_end, engine, top, bottom) VALUES (datetime('now','localtime'), ?, ?, ?, ?, ?, ?)", ('waitocr', frame_id, frame_id, ocrengine, ocrtop, ocrbottom))
+        c.execute("INSERT INTO ocrresult (date, state, frame_start, frame_end, engine, left, top, right, bottom, position) VALUES (datetime('now','localtime'), ?, ?, ?, ?, ?, ?, ?, ?, ?)", ('waitocr', frame_id, frame_id, ocrengine, ocrleft, ocrtop, ocrright, ocrbottom, position))
         c.execute('INSERT INTO jobrange VALUES (?)', (c.lastrowid,))
     log('OCR任务已提交', db=conn)
     conn.commit()
@@ -993,8 +1018,9 @@ def serve_continueocr():
         return ''
     data = flask.request.get_json()
     if data['item_range'] is not None:
-        c.execute('DELETE FROM jobrange')
-        c.executemany('INSERT INTO jobrange VALUES (?)', [(id,) for id in sorted(data['item_range'])])
+        if len(data['item_range']) > 0:
+            c.execute('DELETE FROM jobrange')
+            c.executemany('INSERT INTO jobrange VALUES (?)', [(id,) for id in sorted(data['item_range'])])
     else:
         c.execute("INSERT OR IGNORE INTO jobrange SELECT id FROM ocrresult WHERE (state = 'waitocr' OR state = 'error')")
     restarttype = data['restarttype']
