@@ -98,7 +98,9 @@ function tbledit(item, scroll) {
       app.seteditboxval(newedit[colmap['ocrtext']]);
       app.$refs.editbox.focus();
       app.setocrsel(1, [newedit[colmap['top']], newedit[colmap['bottom']]]);
-      item.ele.scrollIntoView({block: "nearest", inline: "nearest"});
+      if (scroll) {
+        item.ele.scrollIntoView({block: "nearest", inline: "nearest"});
+      }
     }
   } else {
     if (curedit) {
@@ -109,7 +111,7 @@ function tbledit(item, scroll) {
     app.setocrsel(0);
   }
   curedit = newedit;
-  if (!tblselect.has(item)) {
+  if (item && !tblselect.has(item)) {
     tblsel([item]);
   }
   updatetblstyle();
@@ -119,6 +121,8 @@ function updatetbledit() {
     let item = id2item.get(curedit[colmap['id']]);
     if (item && tblselect.has(item)) {
       tbledit(item);
+    } else if (tblselect.size > 0) {
+      tbledit(tblitem.find((item) => tblselect.has(item)));
     } else {
       tbledit(null);
     }
@@ -159,15 +163,15 @@ var tblsortfunc = [
 ];
 var tblfltfunc = [
   ['全部','true'],
-  ['上半屏','position == 8'],
-  ['下半屏','position == 2'],
-  ['=====',null],
-  ['所有非空',"state == 'done' && ocrtext != ''"],
-  ['上半屏非空',"position == 8 && state == 'done' && ocrtext != ''"],
-  ['下半屏非空',"position == 2 && state == 'done' && ocrtext != ''"],
-  ['=====',null],
+  ['所有待处理',"!(state == 'merged' || (state == 'done' && ocrtext == ''))"],
   ['所有空项',"state == 'done' && ocrtext == ''"],
+  ['=====',null],
+  ['上半屏','position == 8'],
+  ['上半屏待处理',"position == 8 && !(state == 'merged' || (state == 'done' && ocrtext == ''))"],
   ['上半屏空项',"position == 8 && state == 'done' && ocrtext == ''"],
+  ['=====',null],
+  ['下半屏','position == 2'],
+  ['下半屏待处理',"position == 2 && !(state == 'merged' || (state == 'done' && ocrtext == ''))"],
   ['下半屏空项',"position == 2 && state == 'done' && ocrtext == ''"],
   ['=====',null],
   ['待清理',"state == 'merged' || (state == 'done' && ocrtext == '')"],
@@ -285,6 +289,8 @@ function updateselect() {
     app.selinfo2 = ' / ' + id2item.size.toString();
   }
   app.tblinfo = '共'+id2item.size+'条字幕' + (id2item.size!=tblview.size?'（筛选后共'+tblview.size+'条）':'');
+
+  app.redrawtimebar();
 }
 function tblclick(e) {
   let item = this.myitem;
@@ -316,7 +322,9 @@ function tblclick(e) {
     tblselect0 = new Set(tblselect);
   }
   updateselect();
-  tbledit(item);
+  if (tblselect.has(item)) {
+    tbledit(item);
+  }
 }
 function tblsel(list) {
   tblselect = new Set(list);
@@ -449,7 +457,6 @@ function updateview(needdelete, needupdate) {
     tblitem.forEach((item) => tableele.tBodies[0].appendChild(item.ele));
   }
 
-  app.redrawtimebar();
   updateselect();
 }
 function updateresult(jsonstr) {
@@ -1057,6 +1064,10 @@ function (items) {
       this.mergeneighbor(prev, curr, true, next);
     },
     jumpprev() {
+      if (!curedit) {
+        tbledit(tblitem.find((item) => tblselect.has(item)), 1);
+        return;
+      }
       let prev = this.findneighbor()[0];
       if (prev) {
         tbledit(prev, 1);
@@ -1065,6 +1076,10 @@ function (items) {
       }
     },
     jumpnext() {
+      if (!curedit) {
+        tbledit(tblitem.find((item) => tblselect.has(item)), 1);
+        return;
+      }
       let next = this.findneighbor()[2];
       if (next) {
         tbledit(next, 1);
@@ -1239,9 +1254,10 @@ function (items) {
       let state_color = [
         null,
         [255,255,255], // 1: not in view
-        [176,94,0], // 2: waitocr
-        [84,168,0],  // 3: done (ocrtext != '')
-        [255,0,0],  // 4: error
+        [176,94,0],    // 2: waitocr
+        [84,168,0],    // 3: done (ocrtext != '')
+        [255,0,0],     // 4: error
+        [130,215,255], // 5: selected
       ];
       let f = w / this.info.nframes;
       id2item.forEach((item) => {
@@ -1253,6 +1269,9 @@ function (items) {
         }
         if (p > 0 && !tblview.has(item)) {
           p = 1;
+        }
+        if (tblselect.has(item)) {
+          p = 5;
         }
         if (p > 0) {
           for (let i = item.r[colmap['frame_start']]; i <= item.r[colmap['frame_end']]; i++) {
