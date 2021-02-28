@@ -107,7 +107,7 @@ class VideoReader:
             self.cap.set(cv2.CAP_PROP_POS_FRAMES, frame)
             succ, img = self.cap.read()
             if succ:
-                self.logs.append(('读取视频帧%d/%d时发生错误，已尝试恢复；请考虑先转码一遍视频'%(frame, self.nframes), 'W'))
+                self.logs.append(('读取视频帧%d/%d时发生错误，已尝试恢复；请考虑先转码一遍视频'%(frame, self.nframes), 'E'))
                 return img
         self.logs.append(('读取视频帧%d/%d时发生错误；请考虑先转码一遍视频'%(frame, self.nframes), 'E'))
         return np.zeros((self.height, self.width, 3), np.uint8)
@@ -473,7 +473,7 @@ class DummyOcr:
         if gconfig['dummyocr']['always_error']:
             return [('error', None)] * len(imglist)
         else:
-            return [('done', '测试')] * len(imglist)
+            return [('done', gconfig['dummyocr']['text'])] * len(imglist)
     def done(self):
         return None
 
@@ -726,7 +726,7 @@ def serve_logs():
             SELECT * FROM (SELECT ROWID AS id, * FROM logs WHERE checkpoint_id IS NULL ORDER BY ROWID DESC LIMIT ?)
             UNION ALL
             SELECT * FROM (SELECT ROWID AS id, * FROM logs WHERE checkpoint_id IS NOT NULL ORDER BY ROWID DESC LIMIT ?)
-        ) ORDER BY id''', (gconfig['maxlog'], gconfig['maxcheckpoint']))
+        ) ORDER BY id''', (gconfig['max_log'], gconfig['max_checkpoint']))
 
 @app.route('/state', methods=['POST'])
 @session_header_required
@@ -757,8 +757,8 @@ def serve_exportass():
         log('无字幕数据', 'I', db=conn)
         conn.commit()
         return ''
-    outfile = video + '.export.ass'
-    if os.path.exists(outfile):
+    outfile = video + gconfig['export_suffix'] + '.ass'
+    if os.path.exists(outfile) and not gconfig['export_overwrite']:
         log('输出文件已存在，请先删除：%s'%outfile, 'E', db=conn)
         conn.commit()
         return ''
@@ -802,7 +802,7 @@ def serve_exportass():
 @app.route('/exportcsv', methods=['POST'])
 @session_header_required
 def serve_exportcsv():
-    outfile = video + '.export.csv'
+    outfile = video + gconfig['export_suffix'] + '.csv'
     output = io.StringIO()
     row = c.execute('SELECT * FROM ocrresult ORDER BY frame_start,frame_end,top,bottom,engine,id').fetchall()
     col = [x[0] for x in c.description]
@@ -810,7 +810,7 @@ def serve_exportcsv():
     w.writerow(col)
     for r in row:
         w.writerow(map(lambda x: x if x is not None else 'SQLITE_NULL', r))
-    if os.path.exists(outfile):
+    if os.path.exists(outfile) and not gconfig['export_overwrite']:
         log('输出文件已存在，请先删除：%s'%outfile, 'E', db=conn)
     else:
         with open(outfile, 'wb') as f:

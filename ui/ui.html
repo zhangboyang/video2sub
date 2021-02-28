@@ -94,15 +94,15 @@
         </div>
         <div id="tblarea">
           <div id="tblop">
-            <div id="tblhint" @click="tblselnone">单击:<span>选择</span> / Ctrl+单击:<span>多选</span> / Shift+单击:<span>选择范围</span></div>
+            <div id="tblsummary" @click="tblselnone"><span><span>{{tblinfo}}</span><span style="color:gray">{{tblinfo2}}</span></span></div>
             <div id="tblsort">
-              排序
+              <span>排序</span>
               <select v-model="tblsort">
                 <option v-for="i in tblsortfunc" :value="i[1]">{{i[0]}}</option>
               </select>
             </div>
             <div id="tblfilter">
-              筛选
+              <span>筛选</span>
               <select v-model="tblflt">
                 <option v-for="i in tblfltfunc" :value="i[1]" :disabled="i[1]===null">{{i[0]}}</option>
               </select>
@@ -122,20 +122,20 @@
               </thead>
               <tbody></tbody>
             </table>
-            <div id="tblsummary" @click="tblselnone">{{tblinfo}}</div>
+            <div id="tblhint" @click="tblselnone">单击:<span>选择</span> / Ctrl+单击:<span>多选</span> / Shift+单击:<span>选择范围</span></div>
           </div>
         </div>
         <div id="op">
           <div>
             <div>
-              选中：<span>{{selinfo}}</span><span style="color:gray">{{selinfo2}}</span>
-              <span style="float: right">
+              <span>选中：<span>{{selinfo}}</span><span style="color:gray">{{selinfo2}}</span></span>
+              <div style="float: right">
                 <a class="button" @click.prevent="tblselnone">不选<div class="bl">取消选择所有字幕</div></a>
                 <a class="button" @click.prevent="tblselall">全选<div class="bl">选择筛选后的所有字幕</div></a>
-              </span>
+              </div>
             </div>
             <div id="export">
-              <a class="button" @click.prevent="exportass">导出ASS<div class="bl">导出为ASS字幕文件</div></a>
+              <a class="button" @click.prevent="exportass" style="color:darkmagenta">导出ASS<div class="bl">导出为ASS字幕文件</div></a>
               &nbsp;&nbsp;
               <a class="button" @click.prevent="exportcsv">导出CSV<div class="bl">导出为CSV表格文件</div></a>
               <label for="csvfile0"><a class="button">导入CSV<div class="bl">用CSV文件中的数据更新已有字幕<br>文件中id列被设为0的字幕将作为新字幕项插入</div></a></label>
@@ -146,7 +146,7 @@
           </div>
           <div>
             <div>
-              脚本：
+              <span>脚本：</span>
               <a class="button" @click.prevent="checkselect()&&runscript(myscript.scripts.find(s=>s.name=='合并相同'))">合并相同<div class="bl">合并相邻且文字完全相同的字幕</div></a>
               <a class="button" @click.prevent="checkselect()&&runscript(myscript.scripts.find(s=>s.name=='清理'))">清理<div class="bl">删除空字幕、被合并字幕</div></a>
               &nbsp;
@@ -157,7 +157,7 @@
               <a class="button" @click.prevent="checkselect(true)&&showcodeedit(1)">执行自定义脚本<div class="bl">执行自定义JavaScript脚本</div></a>
             </div>
             <div id="engine">
-              引擎：
+              <span>引擎：</span>
               <select v-model="ocrconfig.engine" @change="saveconfig('OCR', ocrconfig, 'OCR引擎已设定为：'+engines.get(ocrconfig.engine))">
                 <option v-for="engine in Array.from(engines.entries())" :value="engine[0]">{{engine[1]}}</option>
               </select>

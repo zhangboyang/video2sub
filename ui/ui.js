@@ -132,7 +132,7 @@ function updatetbledit() {
 ///////////////////////////////////////////////////////////////////////////////
 
 var coldesc = [
-  ['id', '字幕唯一内部ID'],
+  ['id', '字幕唯一内部ID(不可修改)'],
   ['state', '字幕状态：waitocr, error, done, merged'],
   ['frame_start', '字幕起始帧(含)'],
   ['frame_end', '字幕结束帧(含)'],
@@ -288,7 +288,13 @@ function updateselect() {
     app.selinfo = tblselect.size.toString();
     app.selinfo2 = ' / ' + id2item.size.toString();
   }
-  app.tblinfo = '共'+id2item.size+'条字幕' + (id2item.size!=tblview.size?'（筛选后共'+tblview.size+'条）':'');
+  if (id2item.size != tblview.size) {
+    app.tblinfo = '筛选后显示了'+tblview.size+'条';
+    app.tblinfo2 = '（共'+id2item.size+'条字幕）';
+  } else {
+    app.tblinfo = '共'+id2item.size+'条字幕';
+    app.tblinfo2 = '';
+  }
 
   app.redrawtimebar();
 }
@@ -585,6 +591,7 @@ app = new Vue({
     selinfo: '',
     selinfo2: '',
     tblinfo: '',
+    tblinfo2: '',
 
     logs: {col:[],row:[]},
     checkpointonly: 0,
@@ -1257,7 +1264,7 @@ function (items) {
         [176,94,0],    // 2: waitocr
         [84,168,0],    // 3: done (ocrtext != '')
         [255,0,0],     // 4: error
-        [130,215,255], // 5: selected
+        [0,123,255],   // 5: selected
       ];
       let f = w / this.info.nframes;
       id2item.forEach((item) => {

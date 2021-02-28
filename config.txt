@@ -1,15 +1,21 @@
 # 请按Python语法编辑此文件（代码使用ast.literal_eval读入此文件）
 
 {
+## 通用设置 ######################################################
+
     'host': '127.0.0.1',
     'port': [20000, 21000], # 前端与后端的通信端口范围（左闭右开区间）
 
-    'maxlog': 100,          # (显示出来的)最大日志条目项数
-    'maxcheckpoint': 1000,  # (显示出来的)最大恢复点项数
+    'max_log': 1500,         # (显示出来的)最大日志条目项数
+    'max_checkpoint': 1500,  # (显示出来的)最大恢复点项数
 
     'fix_ntsc_fps': True,   # 修正NTSC帧率（如29.970改为30000/1001）
 
+    'export_suffix': '.chs',    # 导出文件的后缀
+    'export_overwrite': False,  # 导出时是否覆盖已存在文件
+
 ## UI 界面设置 ######################################################
+
     'thumbnail': { # 缩略图设置
         'height': 150,     # 高度
         'npart': 10,       # 同一文件中合并存储几张缩略图
@@ -69,9 +75,11 @@
     #### dummyocr(调试用)
     'dummyocr': {
         'always_error': 0,
+        'text': '测试',
     },
 
 ## ASS 导出设置 ######################################################
+
     'ass_format': {
         'header':  ################ ASS文件头模板
 '''[Script Info]
@@ -102,4 +110,5 @@ Format: Layer, Start, End, Style, Name, MarginL, MarginR, MarginV, Effect, Text
             'start': ('floor', +0.5, +1e-3, 0), 'end': ('floor', +0.5, +1e-3, 0),  # 适用于VLC播放器
         },
     },
+
 }

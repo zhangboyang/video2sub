@@ -265,16 +265,7 @@ div.toolbox > div.text {
 #timebar > div#barbg {
   width: 100%;
 }
-#timebar > div#posmarker {
-  width: 0;
-  height: 0;
-  margin: 0 -5px;
-  border-style: solid;
-  border-width: 0 5px 10px 5px;
-  border-color: transparent transparent #007bff transparent;
-  z-index: 2;
-}
-#timebar > div#mousemarker {
+#timebar > div#posmarker, #timebar > div#mousemarker {
   width: 0;
   height: 0;
   margin: 0 -5px;
@@ -330,6 +321,11 @@ div.toolbox > div.text {
   display: block;
   padding: 2px 10px;
   height: 26px;
+}
+#op > div > div > span {
+  line-height: 26px;
+  display: inline-block;
+  vertical-align: top;
 }
 #op > div:not(:first-child) > div {
   border-left: 1px solid black;
@@ -428,8 +424,17 @@ table tr:last-child td {
   min-height: 5px;
 }
 #tblsummary {
+  width: 350px;
+  text-align: center;
+}
+#tblhint {
+  flex: 1;
   padding: 2px 10px;
   border-top: 1px solid gray;
+  color: gray;
+}
+#tblhint > span {
+  color: rgb(64, 128, 64);
 }
 #tblop {
   display: flex;
@@ -442,8 +447,10 @@ table tr:last-child td {
 #tblop > div:not(:first-child) {
   border-left: 1px solid black;
 }
-#tblhint > span {
-  color: green;
+#tblop > div > span {
+  line-height: 24px;
+  vertical-align: top;
+  display: inline-block;
 }
 #tblop select {
   border: 1px solid black;
@@ -461,6 +468,8 @@ table tr:last-child td {
 #text {
   flex: 1;
   overflow-y: scroll;
+  display: flex;
+  flex-direction: column;
 }
 #text > table {
   width: 100%;
