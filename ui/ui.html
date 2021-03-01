@@ -151,6 +151,7 @@
               <a class="button" @click.prevent="checkselect()&&runscript(myscript.scripts.find(s=>s.name=='清理'))">清理<div class="bl">删除空字幕、被合并字幕</div></a>
               &nbsp;
               <a class="button" @click.prevent="checkselect()&&runscript(myscript.scripts.find(s=>s.name=='强制合并相邻'))">强制合并相邻<div class="bl">合并相邻字幕，不论文字是否相同</div></a>
+              <a class="button" @click.prevent="checkselect()&&runscript(myscript.scripts.find(s=>s.name=='强制合并'))">强制合并<div class="bl">合并字幕，不论文字是否相同，也不论是否相邻</div></a>
               <a class="button" @click.prevent="checkselect()&&runscript(myscript.scripts.find(s=>s.name=='删除'))">删除<div class="bl">删除选中的字幕</div></a>
               <a class="button" @click.prevent="checkselect()&&runscript(myscript.scripts.find(s=>s.name=='克隆'))">克隆<div class="bl">克隆一份选中的字幕</div></a>
               &nbsp;
@@ -158,7 +159,7 @@
             </div>
             <div id="engine">
               <span>引擎：</span>
-              <select v-model="ocrconfig.engine" @change="saveconfig('OCR', ocrconfig, 'OCR引擎已设定为：'+engines.get(ocrconfig.engine))">
+              <select v-model="ocrconfig.engine" @change="saveconfig('OCR', ocrconfig, 'OCR引擎已设定为：'+engines.get(ocrconfig.engine).split(' --')[0]+' ['+ocrconfig.engine+']')">
                 <option v-for="engine in Array.from(engines.entries())" :value="engine[0]">{{engine[1]}}</option>
               </select>
               <a class="button" @click.prevent="startocr">新OCR<div class="bl">对范围内所有帧，新建一条字幕项并执行OCR<br>一般该操作只需要执行一次</div></a>
@@ -179,10 +180,10 @@
             <table>
               <tr v-for="log in ziprowarr(logs)" v-if="!checkpointonly||log.checkpoint_id!==null" :data-level="log.level">
                 <td>{{log.date}}</td>
-                <td>{{log.message}}<span v-if="log.checkpoint_id">&nbsp;<a @click.prevent="rollback(log.checkpoint_id)">{{log.level=='C'?'撤销至此':'撤销至此操作之前'}}</a></span></td>
+                <td><span v-if="log.checkpoint_id&&log.level!='C'">#{{log.checkpoint_id}}&nbsp;</span>{{log.message}}<span v-if="log.checkpoint_id">&nbsp;<a @click.prevent="rollback(log.checkpoint_id)">{{log.level=='C'?'撤销至此':'撤销至此操作之前'}}</a></span></td>
               </tr>
               <tr v-if="waitstatus"><td></td><td>处理中…</td></tr>
-              <tr v-if="pageerror" style="background-color: red; color: yellow"><td></td><td>与后端通信失败，请刷新页面重试！！！</td></tr>
+              <tr v-if="pageerror" style="background-color: red; color: yellow"><td></td><td>与后端通信失败，继续操作数据可能会丢失，请重新启动本程序！！！</td></tr>
             </table>
           </div>
         </div>

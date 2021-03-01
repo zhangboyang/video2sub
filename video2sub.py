@@ -273,7 +273,7 @@ def checkpoint(message, generate_log=True):
     c.execute("INSERT INTO checkpoint (dbver, date, message, data) VALUES (?, datetime('now','localtime'), ?, ?)", (dbver, message, dump))
     checkpoint_id = c.lastrowid
     if generate_log:
-        log('已创建恢复点 #%d (%s)'%(checkpoint_id, message), 'C', checkpoint_id=checkpoint_id, db=conn)
+        log('已创建恢复点 #%d %s'%(checkpoint_id, message), 'C', checkpoint_id=checkpoint_id, db=conn)
     print('checkpoint #%d (%s) is %.2fKB (gzip)' % (checkpoint_id, message, len(dump)/1024))
     return checkpoint_id
 
@@ -885,7 +885,7 @@ def serve_rollback():
     checkpoint_id = data['checkpoint_id']
     err, msg = rollback(checkpoint_id)
     if err is None:
-        log('已还原到恢复点 #%d (%s)'%(checkpoint_id, msg), 'S', db=conn)
+        log('已还原到恢复点 #%d %s'%(checkpoint_id, msg), 'S', db=conn)
         checkwaitocr(db=conn)
     else:
         log('无法还原到恢复点 #%d (%s)'%(checkpoint_id, err), 'E', db=conn)
@@ -978,7 +978,7 @@ def serve_startocr():
         log('已有OCR任务运行中，无法启动新任务', 'E', db=conn)
         conn.commit()
         return ''
-    checkpoint('执行“新OCR”之前')
+    checkpoint('“新OCR”之前 [%s]'%ocrengine)
     data = flask.request.get_json()
     frame_range = data['frame_range']
     if frame_range is None:
@@ -987,7 +987,7 @@ def serve_startocr():
     for frame_id in sorted(frame_range):
         c.execute("INSERT INTO ocrresult (date, state, frame_start, frame_end, engine, left, top, right, bottom, position) VALUES (datetime('now','localtime'), ?, ?, ?, ?, ?, ?, ?, ?, ?)", ('waitocr', frame_id, frame_id, ocrengine, ocrleft, ocrtop, ocrright, ocrbottom, position))
         c.execute('INSERT INTO jobrange VALUES (?)', (c.lastrowid,))
-    log('OCR任务已提交', db=conn)
+    log('OCR任务已提交 [%s]'%ocrengine, db=conn)
     conn.commit()
     startocr()
     return 'ok'
@@ -1033,7 +1033,7 @@ def serve_continueocr():
             log('没有任务要做', db=conn)
             conn.commit()
             return ''
-        checkpoint('执行“继续OCR”之前')
+        checkpoint('“继续OCR”之前 [%s]'%new_engine)
         c.execute("UPDATE ocrresult SET state = 'waitocr', engine = ? WHERE (state = 'waitocr' OR state = 'error') AND EXISTS (SELECT * FROM jobrange WHERE ocrresult.id = jobrange.id)", (new_engine,))
     elif restarttype == 'all':
         donecnt = c.execute("""
@@ -1043,7 +1043,7 @@ def serve_continueocr():
             log('没有任务要做', db=conn)
             conn.commit()
             return ''
-        checkpoint('执行“重新OCR”之前')
+        checkpoint('“重新OCR”之前 [%s]'%new_engine)
         c.execute("UPDATE ocrresult SET state = 'waitocr', engine = ? WHERE (state = 'waitocr' OR state = 'error' OR state = 'waitocr' OR state = 'done') AND EXISTS (SELECT * FROM jobrange WHERE ocrresult.id = jobrange.id)", (new_engine,))
     elif restarttype == 'empty':
         emptycnt = c.execute("""
@@ -1053,11 +1053,11 @@ def serve_continueocr():
             log('没有任务要做', db=conn)
             conn.commit()
             return ''
-        checkpoint('执行“空项OCR”之前')
+        checkpoint('“空项OCR”之前 [%s]'%new_engine)
         c.execute("UPDATE ocrresult SET state = 'waitocr', engine = ? WHERE (state = 'done' AND ocrtext = '') AND EXISTS (SELECT * FROM jobrange WHERE ocrresult.id = jobrange.id)", (new_engine,))
     else:
         assert False
-    log('OCR任务已提交', db=conn)
+    log('OCR任务已提交 [%s]'%new_engine, db=conn)
     conn.commit()
     startocr()
     return 'ok'

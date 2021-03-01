@@ -205,6 +205,12 @@ function setviewopt(filter, sortkey) {
   }
   if (filter !== null || sortkey !== null) {
     updateview();
+    if (curedit) {
+      let item = id2item.get(curedit[colmap['id']]);
+      if (item) {
+        item.ele.scrollIntoView({block: "nearest", inline: "nearest"});
+      }
+    }
   }
 }
 function sortedview(expr) {
@@ -627,6 +633,7 @@ function (items) {
     alert('请选择多条字幕');
     return '没有合并字幕';
   }
+  let nmerged = 0;
   let lastitem = null;
   for (let item of items) {
     if (lastitem != null) {
@@ -636,6 +643,7 @@ function (items) {
             lastitem.frame_end = item.frame_end;
             item.state = 'merged';
             item.comment = '已合并到上一字幕';
+            nmerged++;
             continue;
           }
         }
@@ -645,6 +653,7 @@ function (items) {
       lastitem = item;
     }
   }
+  return '合并了' + nmerged + '条字幕';
 }
 ` },
       { name: '强制合并相邻', locked: true, value: `// 强制合并相邻：合并相邻字幕，不论文字是否相同
@@ -654,6 +663,7 @@ function (items) {
     return '没有合并字幕';
   }
   if (confirm('确定要强制合并相邻字幕吗？')) {
+    let nmerged = 0;
     let lastitem = null;
     for (let item of items) {
       if (lastitem != null) {
@@ -661,6 +671,7 @@ function (items) {
           lastitem.frame_end = item.frame_end;
           item.state = 'merged';
           item.comment = '已合并到上一字幕';
+          nmerged++;
           continue;
         }
       }
@@ -668,6 +679,34 @@ function (items) {
         lastitem = item;
       }
     }
+    return '强制合并了' + nmerged + '条相邻字幕';
+  } else {
+    return '没有合并字幕';
+  }
+}
+` },
+{ name: '强制合并', locked: true, value: `// 强制合并：合并字幕，不论文字是否相同，也不论是否相邻
+function (items) {
+  if (items.length < 2) {
+    alert('请选择多条字幕');
+    return '没有合并字幕';
+  }
+  if (confirm('确定要强制合并吗？')) {
+    let nmerged = 0;
+    let lastitem = null;
+    for (let item of items) {
+      if (lastitem != null) {
+        lastitem.frame_end = item.frame_end;
+        item.state = 'merged';
+        item.comment = '已合并到上一字幕';
+        nmerged++;
+        continue;
+      }
+      if (item.state == 'done') {
+        lastitem = item;
+      }
+    }
+    return '强制合并了' + nmerged + '条字幕';
   } else {
     return '没有合并字幕';
   }
@@ -1307,9 +1346,6 @@ function (items) {
     },
 
     tblselall() {
-      /*this.tblflt = this.tblfltfunc[0][1];
-      this.tblsort = this.tblsortfunc[0][1];
-      setviewopt(this.tblflt, this.tblsort);*/
       tblselall();
     },
     tblselnone() { tblselnone(); },
@@ -1516,6 +1552,9 @@ function (items) {
     },
     async rollback(checkpoint_id) {
       if (confirm('确定要恢复到 #'+checkpoint_id+' 吗？\n字幕数据将被替换为恢复点中的数据。')) {
+        curedit = null;
+        tbledit(null);
+        tblitem.forEach((item) => tbllock(item));
         this.checkpointonly = 0;
         this.morelog = 0;
         this.setwaitstatus();
