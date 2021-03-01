@@ -29,9 +29,24 @@
                   <a @click.prevent="setframescale(480)">大</a>
                 </div>
               </div>
+              <div id="jumpframe" class="toolbox">
+                <strong>跳转</strong>
+                <div>
+                  <table>
+                    <tr v-for="sgn in [-1,1]">
+                      <td v-for="n in [1,Math.round(info.fps)*0.5,Math.round(info.fps)*1]" :title="(sgn>0?'+':'-')+(n>1?n/Math.round(info.fps)+'s':n+'帧')" @click.prevent="setframepos(pos+n*sgn,1)">
+                        {{sgn>0?'+':'-'}}{{n}}
+                      </td>
+                    </tr>
+                  </table>
+                </div>
+                <div class="text" style="text-align: center;">
+                  <a @click.prevent="jumpframe()">手工输入</a>
+                </div>
+              </div>
             </div>
             <div id="framebox">
-              <div id="frametitle" class="toolbox"><strong ref="curframe">当前帧 ({{pos}})</strong></div>
+              <div id="frametitle" class="toolbox"><strong ref="curframe" :title="postitle">当前帧 ({{pos}})</strong></div>
               <div id="frame" :style="{ width: getdispw()+'px', height: getdisph()+'px' }">
                 <img v-if="getdisph()!=info.thumb_h" :src="'/frame?id='+pos" @load="imgload($refs.curframe)" draggable="false" />
                 <imgdb v-else :src="ziprowidx(thumbnail, pos)" @my-load="imgload($refs.curframe)"></imgdb>
@@ -107,7 +122,7 @@
                 <option v-for="i in tblfltfunc" :value="i[1]" :disabled="i[1]===null">{{i[0]}}</option>
               </select>
             </div>
-            <input id="tblfltcustom" type="text" v-model="tblfltedit" @keydown="tblfltkeydown" :style="{'background-color': tblfltedit==tblflt ? (tblflterr ? 'lightpink':'azure') : 'lemonchiffon'}" title="自定义JavaScript表达式，按回车应用，具体参数详见“高级编辑”或“执行自定义脚本”功能" spellcheck="false">
+            <input id="tblfltcustom" type="text" v-model="tblfltedit" @keydown="tblfltkeydown" :style="{'background-color': tblfltedit==tblflt ? (tblflterr ? 'lightpink':'azure') : 'lemonchiffon'}" title="自定义JavaScript筛选表达式，按回车应用，具体参数详见“高级编辑”或“执行自定义脚本”功能" spellcheck="false">
           </div>
           <div id="text">
             <table id="ocrresult" @click="tblselnone">
@@ -203,7 +218,7 @@
           <a class="button" @click.prevent="delscript">删除</a>
           <a class="button" @click.prevent="newscript">新建</a>
           <span v-if="scriptsel&&scriptsel.locked" style="color: red">该脚本已锁定，不可更改</span>
-          <span v-else>提示：按Ctrl+Shift+I可打开控制台。</span>
+          <span v-else>提示：按 Ctrl+Shift+I 可打开控制台。</span>
         </div>
         <div id="editordiv" ref="codemirror"></div>
         <div id="codeeditorop">

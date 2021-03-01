@@ -55,7 +55,7 @@ function sec2str(sec) {
   let s = sec % 60;
   let m = Math.floor(sec / 60) % 60;
   let h = Math.floor(sec / 60 / 60);
-  return ('0'+h.toString()).slice(-2) +':'+ ('0'+m.toString()).slice(-2) +':'+ ('0'+s.toString()).slice(-2);
+  return h.toString() +':'+ ('0'+m.toString()).slice(-2) +':'+ ('0'+s.toString()).slice(-2);
 }
 
 ///////////////////////////////////////////////////////////////////////////////
@@ -383,7 +383,7 @@ function updateelement(item, lastele, rebuildtable) {
   item.ele.dataset.state = row.state;
   item.ele.dataset.empty = row.ocrtext == '' ? 'empty' : '';
   item.ele.dataset.position = row.position.toString();
-  item.ele.children[0].title = sec2str(row.frame_start * (1/app.info.fps));
+  item.ele.children[0].title = sec2str(row.frame_start / app.info.fps);
   item.ele.children[0].innerText = row.frame_start + '-' + row.frame_end;
   item.ele.children[1].innerText = row.top + '-' + row.bottom;
   item.ele.children[2].innerText = row.engine;
@@ -568,7 +568,7 @@ app = new Vue({
     loaded: 0,
     info: {file: '', width: 100, height: 100, thumb_w: 100, thumb_h: 100, fps: 0, nframes: 100},
     thumbnail: {col:[],row:[]},
-
+    
     mousexy: [-1, -1], // frame image
     mousexydown: 0,
     ocrsel_origin: -1,
@@ -578,6 +578,7 @@ app = new Vue({
     framescale: 1,
 
     pos: -1,
+    postitle: '',
     mousepos: -1, mouseposdown: 0, // timebar
     pixeldata: null,
 
@@ -613,7 +614,7 @@ app = new Vue({
 
     codeeditor: 0,
     codeedit: null,
-    myscript: { scripts: [] },
+    myscript: { lastid: 0, scripts: [] },
     scriptuploadtimer: null,
     scriptsel: null,
     scriptsel2: null,
@@ -764,14 +765,16 @@ function (items) {
     myprompt: null,
   },
   watch: {
-    pos() {
+    pos(newpos) {
       //updateselect();
       [this.$refs.prevframe, this.$refs.curframe, this.$refs.nextframe].forEach((ref) => {
         ref.style.color = 'gray';
         ref.style.textDecoration = 'line-through';
       });
+      this.postitle = sec2str(newpos / this.info.fps);
     },
     editorfontsize() { this.saveui(); },
+    editorup() { this.saveui(); },
     tblsort(newsort, oldsort) {
       if (newsort !== oldsort) {
         setviewopt(null, newsort);
@@ -791,9 +794,7 @@ function (items) {
     this.ocrconfig = await this.loadconfig('OCR')
     this.setocrsel(0);
     this.engines = new Map((await axios.post('/allengines')).data);
-    let uiconfig = await this.loadconfig('UI')
-    this.setframescale(uiconfig.disp_h);
-    this.editorfontsize = uiconfig.editorfontsize;
+    await this.loadui();
     this.myscript = await this.loadconfig('SCRIPT', { lastid: 0, scripts: [] });
     this.myscript.scripts = this.defaultscripts.concat(this.myscript.scripts.filter((s)=>!s.locked));
     this.scriptsel = this.myscript.scripts.slice(-1)[0];
@@ -857,6 +858,27 @@ function (items) {
     setframescale(h) { this.framescale = h / this.info.height; this.saveui(); },
     getdisph() { return Math.round(this.info.height*this.framescale); },
     getdispw() { return Math.round(this.info.width*this.framescale); },
+
+    jumpframe(expr) {
+      this.showmyprompt('请输入表达式：\n如“100”，“n+10”，“n-10”，“n+fps*10”', expr !== undefined ? expr : this.pos.toString(), (val) => {
+        if (val !== null) {
+          let next;
+          try {
+            next = Math.round(compile_expr([], ['n','fps'], val)(this.pos, this.info.fps));
+            if (isNaN(next)) {
+              throw 'nan';
+            }
+          } catch (e) {
+            alert('求值时发生错误！');
+            this.$nextTick(function() {
+              this.jumpframe(val);
+            });
+            return;
+          }
+          this.setframepos(next, 1);
+        }
+      });
+    },
 
     y2percent(y) {
       return y / this.info.height * 100 + '%';
@@ -1200,7 +1222,7 @@ function (items) {
         changes = compile_expr([], [], this.adveditcm.getDoc().getValue())();
       } catch (e) {
         console.log(e);
-        alert('错误: ' + ('lineNumber' in e ? '('+e.lineNumber+'行 '+e.columnNumber+'列)' : '') + '\n' + e + '\n按Ctrl+Shift+I可打开控制台查看更多信息');
+        alert('错误: ' + ('lineNumber' in e ? '('+e.lineNumber+'行 '+e.columnNumber+'列)' : '') + '\n' + e);
         return;
       }
       
@@ -1228,7 +1250,7 @@ function (items) {
         Math.floor((e.clientX - this.$refs.barbg.getBoundingClientRect().left) / this.$refs.barbg.clientWidth * this.info.nframes)));
     },
     setframepos(n, scrolltype) {
-      this.pos = n;
+      this.pos = Math.max(0, Math.min(this.info.nframes - 1, n));
       if (tblview.size > 0 && scrolltype) {
         let tblsorted = sortedview();
         let target = tblsorted.findIndex((item) => item.r[colmap['frame_start']] >= n);
@@ -1434,7 +1456,10 @@ function (items) {
     },
     uploadscript() {
       this.scriptuploadtimer = null;
-      this.saveconfig('SCRIPT', this.myscript, '');
+      this.saveconfig('SCRIPT', {
+        lastid: this.myscript.lastid,
+        scripts: this.myscript.scripts.filter((s)=>!s.locked),
+      }, '');
     },
     checklock() {
       return Array.from(tblselect).every((item) => !item.locked);
@@ -1465,7 +1490,7 @@ function (items) {
         f = compile_func(['alert', 'confirm'], s.value);
       } catch(e) {
         console.log(e);
-        alert('语法错误: ' + ('lineNumber' in e ? '('+e.lineNumber+'行 '+e.columnNumber+'列)' : '') + '\n' + e + '\n按Ctrl+Shift+I可打开控制台查看更多信息');
+        alert('语法错误: ' + ('lineNumber' in e ? '('+e.lineNumber+'行 '+e.columnNumber+'列)' : '') + '\n' + e);
         return false;
       }
       let items = sortedview().filter((item) => tblselect.has(item)).map((item) => ziprow(ocrresult.col, item.r));
@@ -1474,7 +1499,7 @@ function (items) {
         message = f(items);
       } catch(e) {
         console.log(e);
-        alert('运行时错误:\n' + e + '\n按Ctrl+Shift+I可打开控制台查看更多信息');
+        alert('运行时错误:\n' + e);
         return false;
       }
       //console.log(old);
@@ -1563,7 +1588,18 @@ function (items) {
     },
 
     async saveui() {
-      await this.saveconfig('UI', { disp_h: this.getdisph(), editorfontsize:this.editorfontsize }, '');
+      await this.saveconfig('UI', {
+        disp_h: this.getdisph(),
+        editorfontsize: this.editorfontsize,
+        editorup: this.editorup,
+      }, '');
+    },
+    async loadui() {
+      let uiconfig = await this.loadconfig('UI')
+      this.setframescale(uiconfig.disp_h !== undefined ? uiconfig.disp_h : 360);
+      this.editorfontsize = uiconfig.editorfontsize;
+      if (this.editorup !== undefined) this.editorup = uiconfig.editorup;
+      await this.saveui();
     },
 
     appmouseup(e) {

@@ -200,6 +200,9 @@ div.toolbox > div.text {
   display: flex;
   flex-direction: column;
 }
+.neighborframe > .imgdb {
+  cursor: pointer;
+}
 .editorup .neighborframe {
   flex-direction: column-reverse;
 }
@@ -207,9 +210,16 @@ div.toolbox > div.text {
   border-top: 0;
   border-bottom: 1px solid gray;
 }
-#dispsize, #ocrinfo {
-  margin-top: 15px;
+
+#dispsize, #jumpframe, #ocrinfo {
+  margin-top: 10px;
   float: left;
+}
+#jumpframe td {
+  text-align: right;
+  cursor: pointer;
+  color: blue;
+  text-decoration: underline;
 }
 #ocrinfo {
   max-width: 140px;
