@@ -174,6 +174,7 @@ var tblfltfunc = [
   ['下半屏待处理',"position == 2 && !(state == 'merged' || (state == 'done' && ocrtext == ''))"],
   ['下半屏空项',"position == 2 && state == 'done' && ocrtext == ''"],
   ['=====',null],
+  ['多行',"ocrtext.includes('\\n')"],
   ['待清理',"state == 'merged' || (state == 'done' && ocrtext == '')"],
   ['等待OCR',"state == 'waitocr'"],
   ['OCR失败',"state == 'error'"],
@@ -301,6 +302,7 @@ function updateselect() {
     app.tblinfo = '共'+id2item.size+'条字幕';
     app.tblinfo2 = '';
   }
+  document.getElementById('tblnoresult').style.display = tblview.size ? 'none' : '';
 
   app.redrawtimebar();
 }
@@ -788,34 +790,40 @@ function (items) {
     },
   },
   async mounted() {
-    let session = (await axios.post('/session')).data;
-    axios.defaults.headers.common['X-VIDEO2SUB-SESSION'] = session;
-    this.info = (await axios.post('/info')).data;
-    this.ocrconfig = await this.loadconfig('OCR')
-    this.setocrsel(0);
-    this.engines = new Map((await axios.post('/allengines')).data);
-    await this.loadui();
-    this.myscript = await this.loadconfig('SCRIPT', { lastid: 0, scripts: [] });
-    this.myscript.scripts = this.defaultscripts.concat(this.myscript.scripts.filter((s)=>!s.locked));
-    this.scriptsel = this.myscript.scripts.slice(-1)[0];
-    this.pos = 0;
-    tbledit(null);
-    window.onmouseup = (e) => this.appmouseup(e);
-    window.onmousemove = (e) => this.appmousemove(e);
-    window.addEventListener("resize", this.appresize);
-    this.codeedit = CodeMirror(this.$refs.codemirror, {
-      value: '',
-      mode: 'javascript',
-      lineNumbers: true,
-      tabSize: 2,
-    });
-    this.adveditcm = CodeMirror(this.$refs.adveditbox, {
-      value: '',
-      mode: 'javascript',
-      tabSize: 2,
-    });
-    this.codeedit.on('change', () => this.savescript());
-    this.refresh();
+    try {
+      let session = (await axios.post('/session')).data;
+      axios.defaults.headers.common['X-VIDEO2SUB-SESSION'] = session;
+      this.info = (await axios.post('/info')).data;
+      document.title += '：' + this.info.file;
+      this.ocrconfig = await this.loadconfig('OCR')
+      this.setocrsel(0);
+      this.engines = new Map((await axios.post('/allengines')).data);
+      await this.loadui();
+      this.myscript = await this.loadconfig('SCRIPT', { lastid: 0, scripts: [] });
+      this.myscript.scripts = this.defaultscripts.concat(this.myscript.scripts.filter((s)=>!s.locked));
+      this.scriptsel = this.myscript.scripts.slice(-1)[0];
+      this.pos = 0;
+      tbledit(null);
+      window.onmouseup = (e) => this.appmouseup(e);
+      window.onmousemove = (e) => this.appmousemove(e);
+      window.addEventListener("resize", this.appresize);
+      this.codeedit = CodeMirror(this.$refs.codemirror, {
+        value: '',
+        mode: 'javascript',
+        lineNumbers: true,
+        tabSize: 2,
+      });
+      this.adveditcm = CodeMirror(this.$refs.adveditbox, {
+        value: '',
+        mode: 'javascript',
+        tabSize: 2,
+      });
+      this.codeedit.on('change', () => this.savescript());
+      this.refresh();
+    } catch (e) {
+      console.log(e);
+      this.$refs.loading.innerHTML = '<span style="color: red; font-weight: bold">加载时发生错误，请重新启动本程序！！！</span>';
+    }
   },
   methods: {
     ziprowidx(dbresult, idx) {

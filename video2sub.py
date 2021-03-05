@@ -74,7 +74,7 @@ try:
     lock.exclusive()
     lock.shared()
 except Exception:
-    print('无法取得文件锁（多开？）')
+    print('无法取得文件锁（文件被占用？）')
     sys.exit(1)
 
 gconfig = ast.literal_eval(open('config.txt', 'r', encoding='utf_8_sig').read())
@@ -124,9 +124,8 @@ class VideoReader:
 
 
 
-#os.remove(video + '.db')
 def connect_db():
-    return sqlite3.connect(video + '.db', timeout=999999)
+    return sqlite3.connect(os.path.splitext(video)[0] + '.db', timeout=999999)
 
 cap = VideoReader()
 width = cap.width
@@ -216,6 +215,9 @@ if file_dbver < dbver:
     print("数据库升级完成")
     
 conn.commit()
+
+logid_start = c.execute('SELECT MAX(rowid) FROM logs').fetchone()[0]
+logid_start = logid_start if logid_start is not None else 0
 
 def getconfig(db, key):
     val = db.cursor().execute('SELECT value FROM config WHERE key = ?', (key,)).fetchone()
@@ -423,8 +425,10 @@ class BaiduOcr:
                     results = vcat.getresult()
                 else:
                     results.append(('done', '\n'.join([words_result["words"] for words_result in result_json["words_result"]]), str(result_json)))
-            except Exception:
+            except Exception as e:
                 traceback.print_exc()
+                if errmsg is None:
+                    errmsg = str(e)
                 if self.use_batch:
                     results = [('error', errmsg)] * vcat.n
                 else:
@@ -457,9 +461,9 @@ class ChineseOcr:
                 req = urllib.request.urlopen(gconfig['chineseocr']['url'], data, timeout=5)
                 rsp = json.load(req)
                 result = ('done', '\n'.join([item['text'] for item in rsp['res']]))
-            except Exception:
+            except Exception as e:
                 traceback.print_exc()
-                result = ('error', None)
+                result = ('error', str(e))
             results.append(result)
             if ocr_stop:
                 break
@@ -684,6 +688,11 @@ def serve_session():
     session = secrets.token_hex()
     return flask.jsonify(session)
 
+@app.route('/havesession', methods=['POST'])
+def serve_havesession():
+    global session
+    return flask.jsonify(session is not None)
+
 @app.route('/info', methods=['POST'])
 @session_header_required
 def serve_info():
@@ -722,11 +731,11 @@ def serve_thumbnail():
 @session_header_required
 def serve_logs():
     return db2json(conn, '''
-        SELECT id, date, level, message, checkpoint_id FROM (
+        SELECT id, id > ? AS cursession, date, level, message, checkpoint_id FROM (
             SELECT * FROM (SELECT ROWID AS id, * FROM logs WHERE checkpoint_id IS NULL ORDER BY ROWID DESC LIMIT ?)
             UNION ALL
             SELECT * FROM (SELECT ROWID AS id, * FROM logs WHERE checkpoint_id IS NOT NULL ORDER BY ROWID DESC LIMIT ?)
-        ) ORDER BY id''', (gconfig['max_log'], gconfig['max_checkpoint']))
+        ) ORDER BY id''', (logid_start, gconfig['max_log'], gconfig['max_checkpoint']))
 
 @app.route('/state', methods=['POST'])
 @session_header_required
@@ -757,7 +766,7 @@ def serve_exportass():
         log('无字幕数据', 'I', db=conn)
         conn.commit()
         return ''
-    outfile = video + gconfig['export_suffix'] + '.ass'
+    outfile = os.path.splitext(video)[0] + gconfig['export_suffix'] + '.ass'
     if os.path.exists(outfile) and not gconfig['export_overwrite']:
         log('输出文件已存在，请先删除：%s'%outfile, 'E', db=conn)
         conn.commit()
@@ -797,12 +806,12 @@ def serve_exportass():
     f.close()
     log('已导出至：%s'%outfile, 'S', db=conn)
     conn.commit()
-    return ''
+    return 'ok'
 
 @app.route('/exportcsv', methods=['POST'])
 @session_header_required
 def serve_exportcsv():
-    outfile = video + gconfig['export_suffix'] + '.csv'
+    outfile = os.path.splitext(video)[0] + gconfig['export_suffix'] + '.csv'
     output = io.StringIO()
     row = c.execute('SELECT * FROM ocrresult ORDER BY frame_start,frame_end,top,bottom,engine,id').fetchall()
     col = [x[0] for x in c.description]
@@ -812,13 +821,15 @@ def serve_exportcsv():
         w.writerow(map(lambda x: x if x is not None else 'SQLITE_NULL', r))
     if os.path.exists(outfile) and not gconfig['export_overwrite']:
         log('输出文件已存在，请先删除：%s'%outfile, 'E', db=conn)
-    else:
-        with open(outfile, 'wb') as f:
-            f.write(output.getvalue().encode('utf_8_sig'))
-        log('已导出至：%s'%outfile, 'S', db=conn)
+        output.close()
+        conn.commit()
+        return ''
+    with open(outfile, 'wb') as f:
+        f.write(output.getvalue().encode('utf_8_sig'))
+    log('已导出至：%s'%outfile, 'S', db=conn)
     output.close()
     conn.commit()
-    return ''
+    return 'ok'
 
 @app.route('/importcsv', methods=['POST'])
 @session_header_required

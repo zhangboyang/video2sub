@@ -105,8 +105,8 @@ Format: Layer, Start, End, Style, Name, MarginL, MarginR, MarginV, Effect, Text
 '''Dialogue: 0,{{开始时间}},{{结束时间}},Default,,0,0,0,,{{字幕文本}}
 ''',
         'time_alignment': {  ################ ASS字幕时间对齐方式
-            #'start': ('floor', 0, +1e-3, 0), 'end': ('floor', 0, +1e-3, 0),  # 适用于MPC-HC播放器
             'start': ('floor', +0.5, +1e-3, 0), 'end': ('floor', +0.5, +1e-3, 0),  # 适用于VLC播放器
+            #'start': ('floor', 0, +1e-3, 0), 'end': ('floor', 0, +1e-3, 0),  # 适用于MPC-HC播放器
         },
     },
 

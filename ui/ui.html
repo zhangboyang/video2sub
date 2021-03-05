@@ -1,8 +1,8 @@
 <!DOCTYPE html>
 <html>
   <head>
-    <script src="vue.js"></script>
-    <script src="axios.js"></script>
+    <script src="vue/vue.js"></script>
+    <script src="axios/axios.js"></script>
     <link rel="stylesheet" href="ui.css">
     <script src="codemirror/codemirror.js"></script>
     <link rel="stylesheet" href="codemirror/codemirror.css">
@@ -137,7 +137,10 @@
               </thead>
               <tbody></tbody>
             </table>
-            <div id="tblhint" @click="tblselnone">单击:<span>选择</span> / Ctrl+单击:<span>多选</span> / Shift+单击:<span>选择范围</span></div>
+            <div id="tblbottom" @click="tblselnone">
+              <div id="tblnoresult">（无结果）</div>
+              <div id="tblhint">单击:<span>选择</span> / Ctrl+单击:<span>多选</span> / Shift+单击:<span>选择范围</span></div>
+            </div>
           </div>
         </div>
         <div id="op">
@@ -245,7 +248,7 @@
           </div>
         </div>
       </div>
-      <div id="loading" v-show="!loaded">加载中，请稍候…<br><br>若数据较多，加载速度可能会比较慢</div>
+      <div id="loading" ref="loading" v-show="!loaded">加载中，请稍候…<br><br>若数据较多，加载速度可能会比较慢</div>
     </div>
     <script src="ui.js"></script>
   </body>
