@@ -188,7 +188,7 @@
             </div>
           </div>
         </div>
-        <div id="logarea" :style="{ height: morelog ? '190px' : '60px' }">
+        <div id="logarea" :style="{ height: morelog ? '190px' : '74px' }">
           <div class="buttonbar">
             <a class="button" @click.prevent="(checkpointonly^=1)||scrollstatus(),morelog=checkpointonly">{{checkpointonly?'显示所有日志':'只显示恢复点'}}<div class="tr">{{checkpointonly?'在日志栏中显示所有类型日志':'在日志栏中只显示恢复点'}}</div></a>
             <a class="button" @click.prevent="createcheckpoint">创建恢复点<div class="tr">对全部字幕项“存档”，以便需要时“读档”</div></a>

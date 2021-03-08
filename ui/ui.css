@@ -438,11 +438,12 @@ table tr:last-child td {
   text-align: center;
 }
 #tblbottom {
+  border-top: 1px solid gray;
   flex: 1;
   color: gray;
+  user-select: none;
 }
 #tblbottom > div {
-  border-top: 1px solid gray;
   padding: 2px 10px;
 }
 #tblnoresult {

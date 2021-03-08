@@ -53,17 +53,26 @@ else:
 sys.stdout.reconfigure(errors='replace')
 sys.stderr.reconfigure(errors='replace')
 
-version = '1.0 alpha'
+version = '1.0'
 dbver = 1
 
 if len(sys.argv) != 4:
     print('请使用launcher启动器')
     print('若要手动启动后端：')
-    print('  %s [主机名] [端口名] [视频文件名]'%os.path.basename(sys.argv[0]))
+    print('  %s [主机名] [端口名] [视频/数据库文件名]'%os.path.basename(sys.argv[0]))
     sys.exit(1)
 host = sys.argv[1]
 port = sys.argv[2]
-video = sys.argv[3]
+if sys.argv[3].lower().endswith('.v2s'):
+    dbfile = sys.argv[3]
+    if not os.path.isfile(dbfile):
+        print('无法打开数据库文件')
+        sys.exit(1)
+    with sqlite3.connect(dbfile) as conn:
+        video = os.path.join(os.path.dirname(dbfile), conn.cursor().execute("SELECT value FROM config WHERE key = 'file'").fetchone()[0])
+else:
+    video = sys.argv[3]
+    dbfile = os.path.splitext(video)[0] + '.v2s'
 
 try:
     lock = FileLock(video)
@@ -125,7 +134,7 @@ class VideoReader:
 
 
 def connect_db():
-    return sqlite3.connect(os.path.splitext(video)[0] + '.db', timeout=999999)
+    return sqlite3.connect(dbfile, timeout=999999)
 
 cap = VideoReader()
 width = cap.width
@@ -170,6 +179,8 @@ if file_dbver < dbver:
 
 c.execute("INSERT OR REPLACE INTO config VALUES ('lastopen_date',datetime('now','localtime'))")
 c.execute("INSERT OR REPLACE INTO config VALUES ('lastopen_ver', ?)", (version,))
+
+c.execute("INSERT OR REPLACE INTO config VALUES ('file', ?)", (os.path.basename(video),))
 
 c.executemany('INSERT OR IGNORE INTO config VALUES (?,?)', [(k, json.dumps(v)) for k, v in gconfig['default'].items()])
 

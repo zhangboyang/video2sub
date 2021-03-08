@@ -920,6 +920,7 @@ function (items) {
         this.framemousemove(e);
         this.videomousemove(e);
         if (confirm(this.ocrselmode?'确定要修改选中的'+tblselect.size+'条字幕的OCR区域吗？':'确定要修改新项目的OCR区域吗？')) {
+          this.setocrsel(-1, this.ocrsel);
           this.saveocrsel();
         } else {
           this.setocrsel(-1);

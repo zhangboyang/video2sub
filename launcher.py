@@ -299,17 +299,17 @@ try:
     files = sys.argv[1:]
     if windows and len(files) == 0:
         print('请从弹出的窗口中选择要处理的文件')
-        print('  若只指定一个视频文件，则使用图形界面模式')
-        print('  若指定多个视频文件，则使用批处理模式')
+        print('  若只指定一个文件，则使用图形界面模式')
+        print('  若指定多个文件，则使用批处理模式')
         print()
-        files = file_select('请选择要处理的视频文件', '视频文件 (%s)\0%s\0所有文件 (*.*)\0*.*\0'%(EXTENSIONS_VIDEO, EXTENSIONS_VIDEO))
+        files = file_select('请选择要处理的文件', '视频文件 (%s)\0%s\0video2sub 数据库文件 (*.v2s)\0*.v2s\0所有文件 (*.*)\0*.*\0'%(EXTENSIONS_VIDEO, EXTENSIONS_VIDEO))
     files = [os.path.abspath(p) for p in files]
     os.chdir(bundle_dir)
     if len(files) == 0:
         print('使用方法:')
-        print('  %s [视频文件...]'%os.path.basename(sys.argv[0]))
-        print('若只指定一个视频文件，则使用图形界面模式')
-        print('若指定多个视频文件，则使用批处理模式')
+        print('  %s [视频/数据库文件...]'%os.path.basename(sys.argv[0]))
+        print('若只指定一个文件，则使用图形界面模式')
+        print('若指定多个文件，则使用批处理模式')
     elif len(files) == 1:
         print('图形界面模式')
         print('=====')
@@ -363,7 +363,7 @@ try:
                             print('数据库中有未处理完毕的项目，执行“继续OCR”操作')
                             ret = api('/continueocr', {'item_range': None, 'restarttype': ''})
                         elif state['curarea'] == 0:
-                            print('数据库中无该OCR区域的项目, 执行“新OCR”操作')
+                            print('数据库中无该OCR区域的项目，执行“新OCR”操作')
                             ret = api('/startocr', {'frame_range': None})
                         else:
                             assert False
