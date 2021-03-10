@@ -176,14 +176,7 @@ lastwatch = 0
 video = None
 backendlog = None
 backendlog_file = os.path.join(bundle_dir, 'backendlog_%s_%d.txt' % (datetime.now().strftime('%Y%m%d_%H%M%S'), os.getpid()))
-
-def drop_backendlog():
-    global backendlog
-    if backendlog is not None:
-        backendlog.close()
-        backendlog = None
-        if os.path.exists(backendlog_file):
-            os.remove(backendlog_file)
+backendlog_preserve = False
 
 def alloc_hostport():
     host = gconfig['host']
@@ -222,11 +215,15 @@ def run_backend(file, silent=False, nosession=False):
     global lastwatch
     global backendlog
     hostport = alloc_hostport()
-    video = os.path.basename(file)
-    drop_backendlog()
+    cmdline = exe('video2sub.py') + [hostport[0], str(hostport[1]), file]
     if silent:
-        backendlog = open(backendlog_file, 'wb')
-    backend = subprocess.Popen(exe('video2sub.py') + [hostport[0], str(hostport[1]), file], stdout=backendlog if silent else None, stderr=subprocess.STDOUT if silent else None)
+        if backendlog is not None:
+            backendlog.close()
+        with open(backendlog_file, 'a', errors='replace') as f:
+            f.write('>>>>> [%s] >>>>> %s\n' % (datetime.now().strftime('%Y-%m-%d %H:%M:%S'), json.dumps(cmdline, ensure_ascii=False)))
+        backendlog = open(backendlog_file, 'ab')
+    backend = subprocess.Popen(cmdline, stdout=backendlog if silent else None, stderr=subprocess.STDOUT if silent else None)
+    video = os.path.basename(file)
     url = 'http://%s:%d' % hostport
     session = None
     lastwatch = 0
@@ -272,7 +269,7 @@ def api(path, data=b'', retry=True):
                 data = json.dumps(data).encode('utf-8')
                 req.add_header('Content-Type', 'application/json')
             req.data = data
-            req = urllib.request.urlopen(req, timeout=5)
+            req = urllib.request.urlopen(req)
             rsp = req.read()
             try:
                 return json.loads(rsp.decode('utf-8'))
@@ -357,7 +354,7 @@ try:
                             print('迭代次数过多，已放弃')
                             break
                         if i > 0:
-                            print('迭代(第%d次)'%i)
+                            print('迭代（第%d次）'%i)
 
                         if state['lastjob'] > 0:
                             print('数据库中有未处理完毕的项目，执行“继续OCR”操作')
@@ -430,6 +427,8 @@ try:
             assert False
         if success >= 0:
             print('共%d个文件，成功%d个，失败%d个，耗时%.2f秒'%(len(files), success, len(files)-success, time.time()-start_time))
+            if success != len(files):
+                backendlog_preserve = True
         if windows:
             print('按回车退出程序')
             input()
@@ -445,9 +444,13 @@ except Exception as e:
         backendlog.close()
         with open(backendlog_file, 'r', errors='replace') as f:
             lines = f.readlines()
+            for i in range(len(lines)):
+                if lines[-i - 1].startswith('>>>>>'):
+                    lines = lines[-i:] if i > 0 else []
+                    break
             maxshow = 50
             if len(lines) > maxshow:
-                print('===== 只显示了后端日志 (%s) 的最后 %d 行 =====' % (backendlog_file, maxshow))
+                print('===== 后端日志的最后 %d 行 ====='%maxshow)
                 lines = lines[-maxshow:]
             else:
                 print('===== 后端日志 =====')
@@ -464,6 +467,13 @@ if frontend:
     frontend.kill()
     frontend.wait()
 
+if backendlog is not None:
+    backendlog.close()
+    if not fail and not backendlog_preserve and os.path.exists(backendlog_file):
+        os.remove(backendlog_file)
+    else:
+        print('（后端日志已存储为: %s）'%backendlog_file)
+
 if fail:
     print('=====')
     if windows:
@@ -473,5 +483,4 @@ if fail:
         print('遇到致命错误')
     sys.exit(1)
 else:
-    drop_backendlog()
     sys.exit(0)

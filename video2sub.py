@@ -847,8 +847,9 @@ def serve_exportcsv():
 def serve_importcsv():
     try:
         with conn:
-            csvfile = flask.request.files['csv']
-            r = csv.reader(io.TextIOWrapper(csvfile, encoding='utf_8_sig'))
+            csvfile = flask.request.files['csv'].read()
+            encoding = 'utf_8_sig' if csvfile.startswith(b'\xEF\xBB\xBF') else None
+            r = csv.reader(io.TextIOWrapper(io.BytesIO(csvfile), encoding=encoding))
             col = next(r)
             colmap = dict([(c, i) for i, c in enumerate(col)])
             coltype = dict(c.execute("SELECT name,type FROM pragma_table_info('ocrresult')").fetchall())
