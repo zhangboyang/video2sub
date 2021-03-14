@@ -12,6 +12,7 @@ import socket
 from threading import Thread
 from datetime import datetime
 if os.name == 'nt':
+    import msvcrt
     import win32con
     import win32console
     import win32api
@@ -165,6 +166,7 @@ EXTENSIONS_VIDEO = "*.3g2;*.3gp;*.3gp2;*.3gpp;*.amv;*.asf;*.avi;*.bik;*.bin;*.cr
 class BackendDiedError(Exception):
     pass
 
+waitkey = False
 fail = False
 
 gconfig = ast.literal_eval(open(os.path.join(bundle_dir, 'config.txt'), 'r', encoding='utf_8_sig').read())
@@ -430,8 +432,7 @@ try:
             if success != len(files):
                 backendlog_preserve = True
         if windows:
-            print('按回车退出程序')
-            input()
+            waitkey = True
 except KeyboardInterrupt:
     print('手动中断')
 except Exception as e:
@@ -474,13 +475,24 @@ if backendlog is not None:
     else:
         print('（后端日志已存储为: %s）'%backendlog_file)
 
+exitmsg = []
+exitcode = 0
 if fail:
     print('=====')
+    exitmsg.append('遇到致命错误')
+    exitcode = 1
     if windows:
-        print('遇到致命错误，按回车退出程序')
-        input()
+        waitkey = True
+if waitkey:
+    if windows:
+        exitmsg.append('按任意键退出程序')
     else:
-        print('遇到致命错误')
-    sys.exit(1)
-else:
-    sys.exit(0)
+        exitmsg.append('按回车退出程序')
+if len(exitmsg) > 0:
+    print('，'.join(exitmsg))
+if waitkey:
+    if windows:
+        msvcrt.getch()
+    else:
+        input()
+sys.exit(exitcode)

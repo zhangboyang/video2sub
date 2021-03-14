@@ -287,7 +287,7 @@ def checkpoint(message, generate_log=True):
     checkpoint_id = c.lastrowid
     if generate_log:
         log('已创建恢复点 #%d %s'%(checkpoint_id, message), 'C', checkpoint_id=checkpoint_id, db=conn)
-    print('checkpoint #%d (%s) is %.2fKB (gzip)' % (checkpoint_id, message, len(dump)/1024))
+    print('checkpoint #%d (%s) is %.2fKB (zlib)' % (checkpoint_id, message, len(dump)/1024))
     return checkpoint_id
 
 def rollback(checkpoint_id):
