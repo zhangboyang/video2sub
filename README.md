@@ -15,12 +15,12 @@ video2sub 本身没有实现任何 OCR 识别算法，而是使用外部库进�
 
 |文件名|说明|
 |-|-|
-|video2sub-20210314.7z|下载后解压并运行 **launcher.exe** 即可。|
+|video2sub-20210331.7z|下载后解压并运行 **launcher.exe** 即可。|
 |chineseocr-gpu.7z|GPU 版 chineseocr 识别引擎，需要 NVIDIA 显卡。下载后解压并运行 **chineseocr-gpu.exe** 即可。
 |chineseocr-cpu.7z|CPU 版 chineseocr 识别引擎，无需显卡，但速度很慢，不建议使用。
 
 ## 系统需求
 
 - Windows 7 （64位）或更高版本
-- 4GB 以上内存
+- 8GB 以上内存（若不使用 GPU 则 4GB 即可）
 - NVIDIA 显卡：用于 chineseocr 加速（纯 CPU 也能运行，就是太慢）
